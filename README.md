@@ -1,0 +1,87 @@
+<p align="center">
+  <img src="docs/icon.png" width="128" height="128" alt="Copycat icon">
+</p>
+
+<h1 align="center">Copycat</h1>
+
+<p align="center">
+  Clipboard history for your Mac that lives in the Dock.<br>
+  Everything you copy on your Mac or iPhone is kept on a shelf, ready to paste again.
+</p>
+
+<p align="center">
+  <a href="../../releases/latest"><b>Download Copycat</b></a> · macOS 14 Sonoma or later · Apple Silicon and Intel
+</p>
+
+---
+
+## Features
+
+- **Open it anywhere:** click the Dock icon, or press <kbd>⌃</kbd><kbd>⌘</kbd><kbd>V</kbd> from any app.
+- **Click to copy:** single-click an item, or pick one with the arrow keys and press Return. The shelf hides so you can paste as usual.
+- **Several at once:** <kbd>⌘</kbd>-click or <kbd>⇧</kbd>-click items, then drag them out or press Return to copy them all.
+- **iPhone copies stick around:** Universal Clipboard copies from iPhone or iPad, photos and files included, are saved the moment they arrive. Normally macOS deletes them shortly after.
+- **Drag in, drag out:** drop text, photos or videos onto the shelf (or files onto the Dock icon) to keep them, and drag items out into Messages, Mail, Finder and other apps.
+- **Works with every app:** web images in formats like WebP or AVIF get a PNG copy, and Live Text from photos pastes as plain text.
+- **Search and filter:** start typing to search, or filter by text, photos and videos, files, or iPhone.
+- **Right-click** an item for Copy as Plain Text, Edit Before Copying, Pin to Top, Open Link, Show in Finder and Remove.
+- **Dock menu:** recent items, Wipe Clipboard, Pause Capturing and Open at Login.
+
+## Privacy
+
+- Your history stays on your Mac, in `~/Library/Application Support/Copycat`. Copycat makes no network connections.
+- Copies that password managers mark as secret or temporary are never saved (see [nspasteboard.org](http://nspasteboard.org)).
+- Unpinned items are removed after 24 hours. **Wipe Clipboard** empties the clipboard and the shelf at once. Pinned items stay.
+
+## Install
+
+1. Download `Copycat.dmg` from the [latest release](../../releases/latest) and open it.
+2. Drag **Copycat** onto **Applications**.
+3. Open Copycat from Applications. Copycat isn't notarized by Apple, so the first time macOS says it can't verify the app. Click **Done**, open **System Settings → Privacy & Security**, and click **Open Anyway** next to Copycat. You only do this once.
+
+Copycat then opens its shelf and adds itself to your Login Items, since it can only catch copies while it's running. You can turn this off with **Open at Login** in the Dock icon's menu.
+
+For iPhone copies, turn on Handoff on both the Mac and the iPhone, and sign in to the same Apple Account on both.
+
+## Build from source
+
+You need the Xcode Command Line Tools (`xcode-select --install`).
+
+```bash
+./build.sh
+```
+
+| Command | What it does |
+| --- | --- |
+| `./build.sh` | Builds a universal `build/Copycat.app` |
+| `./build.sh --install` | Also installs it to `/Applications` |
+| `./build.sh --package` | Also makes the installer `build/Copycat.dmg` |
+
+The app is ad-hoc signed. The app icon and the installer artwork are drawn in code (`AppIcon.swift`, `InstallerArt.swift`), so the repository has no binary assets.
+
+`Package.swift` is there for editors and `swift build` checks. Use `build.sh` to make the actual app bundle.
+
+### Project layout
+
+| File | Purpose |
+| --- | --- |
+| `Sources/Copycat/Clip.swift` | The clip model, reading the pasteboard, and image conversion |
+| `Sources/Copycat/Store.swift` | History, copying, expiry and storage on disk |
+| `Sources/Copycat/ShelfController.swift` | The shelf window: search, filters, list, menus, drag and drop |
+| `Sources/Copycat/ClipRow.swift` | The SwiftUI card for each item |
+| `Sources/Copycat/AppDelegate.swift` | App lifecycle, Dock menu, main menu |
+| `Sources/Copycat/HotKey.swift` | The global <kbd>⌃</kbd><kbd>⌘</kbd><kbd>V</kbd> shortcut |
+| `Sources/Copycat/AppMover.swift` | Offers to move the app into Applications on first launch |
+| `Support/Info.plist` | The app bundle's Info.plist |
+
+### Releasing
+
+Push a tag like `v1.0.0`. GitHub Actions builds the DMG and attaches it to a new release.
+
+## Contributing
+
+Issues and pull requests are welcome. Please run `./build.sh` before opening a pull request. The project builds in Swift 6 language mode with no warnings.
+
+## License
+
+[MIT](LICENSE)
