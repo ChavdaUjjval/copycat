@@ -73,6 +73,7 @@ if (( package )); then
 
   hdiutil create -quiet -volname Copycat -srcfolder "$STAGE" -fs HFS+ -format UDRW -ov "$TMP/rw.dmg" 2>/dev/null
   MOUNT=$(hdiutil attach "$TMP/rw.dmg" -readwrite -noverify -noautoopen 2>/dev/null | awk -F'\t' '/Apple_HFS/ {print $NF}')
+  [[ -d "$MOUNT" ]] || { echo "Couldn't mount the disk image" >&2; exit 1; }
   # Icon positions match InstallerArt.swift.
   osascript - "$(basename "$MOUNT")" <<'EOF' || echo "warning: couldn't lay out the disk image window (Finder automation not allowed?)" >&2
 on run {volumeName}
