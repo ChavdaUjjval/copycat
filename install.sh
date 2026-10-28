@@ -3,6 +3,8 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/ChavdaUjjval/copycat/main/install.sh | bash
 set -euo pipefail
+# Plain ASCII and ${VAR} throughout: macOS's bash 3.2 can read a non-ASCII character
+# right after $VAR as part of the name in UTF-8 locales.
 
 DMG_URL="https://github.com/ChavdaUjjval/copycat/releases/latest/download/Copycat.dmg"
 BUNDLE_ID="com.ujjvalchavda.copycat"
@@ -24,7 +26,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "Downloading Copycat…"
+echo "Downloading Copycat..."
 curl -fL --progress-bar "$DMG_URL" -o "$TMP/Copycat.dmg" || fail "Couldn't download $DMG_URL"
 
 MOUNT=$(hdiutil attach -nobrowse -readonly -noverify -mountrandom "$TMP" "$TMP/Copycat.dmg" 2>/dev/null \
@@ -33,12 +35,12 @@ MOUNT=$(hdiutil attach -nobrowse -readonly -noverify -mountrandom "$TMP" "$TMP/C
 
 # Quit a running copy so it can be replaced. History and settings are kept.
 if pgrep -x Copycat >/dev/null; then
-  echo "Quitting the running copy…"
+  echo "Quitting the running copy..."
   osascript -e "quit app id \"$BUNDLE_ID\"" 2>/dev/null || true
   for _ in {1..50}; do pgrep -x Copycat >/dev/null || break; sleep 0.1; done
 fi
 
-echo "Installing to $APPS…"
+echo "Installing to ${APPS}..."
 rm -rf "$APP"
 ditto "$MOUNT/Copycat.app" "$APP"
 # Downloaded with curl, the app isn't quarantined, so macOS doesn't ask to approve it. Make sure.
