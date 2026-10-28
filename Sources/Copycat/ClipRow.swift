@@ -35,7 +35,7 @@ enum ThumbnailCache {
     }
 }
 
-// MARK: - Card
+// MARK: - Row
 
 struct ClipRow: View {
     let clip: Clip
@@ -53,140 +53,185 @@ struct ClipRow: View {
     private var symbol: String {
         if clip.link != nil { return "link" }
         switch clip.kind {
-        case .media: return clip.isVideo ? "video.fill" : "photo.fill"
+        case .media: return clip.isVideo ? "play.rectangle.fill" : "photo.fill"
         case .files: return "doc.fill"
         case .text: return "text.alignleft"
         }
     }
 
     private var tint: Color {
-        if clip.link != nil { return .blue }
+        if clip.link != nil { return Color(red: 0.2, green: 0.5, blue: 1) }
         switch clip.kind {
-        case .media: return .purple
-        case .files: return .orange
-        case .text: return .teal
+        case .media: return Color(red: 0.62, green: 0.36, blue: 0.95)
+        case .files: return Color(red: 1, green: 0.58, blue: 0.16)
+        case .text: return Color(red: 0.13, green: 0.62, blue: 0.74)
         }
     }
 
+    // Selected rows use white text on the accent colour, like Spotlight.
+    private var primary: Color { selected ? .white : .primary }
+    private var secondary: Color { selected ? .white.opacity(0.78) : .secondary }
+
     private var fill: Color {
-        if flashed { return Color.green.opacity(0.18) }
-        if selected { return Color.accentColor.opacity(0.14) }
-        return Color.primary.opacity(hovered ? 0.085 : 0.05)
+        if flashed { return Color.green.opacity(0.2) }
+        if selected { return Color.accentColor }
+        return Color.primary.opacity(hovered ? 0.06 : 0)
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            content
-            meta
+        HStack(alignment: .top, spacing: 11) {
+            tile
+            VStack(alignment: .leading, spacing: 4) {
+                content
+                meta
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(10)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
         .background(RoundedRectangle(cornerRadius: 10, style: .continuous).fill(fill))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .strokeBorder(selected ? Color.accentColor : Color.primary.opacity(hovered ? 0.14 : 0.08),
-                              lineWidth: selected ? 2 : 1)
-        )
-        .overlay(alignment: .topTrailing) { badge.padding(8) }
-        .animation(.easeOut(duration: 0.12), value: hovered)
+        .animation(.easeOut(duration: 0.1), value: hovered)
     }
 
     @ViewBuilder private var content: some View {
         if let image = ThumbnailCache.image(for: clip) {
             VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 0) {
-                    ZStack {
-                        Image(nsImage: image).resizable().aspectRatio(contentMode: .fit)
-                        if clip.isVideo {
-                            Image(systemName: "play.circle.fill")
-                                .font(.system(size: 30))
-                                .foregroundStyle(.white, .black.opacity(0.45))
-                        }
+                ZStack {
+                    Image(nsImage: image).resizable()
+                    if clip.isVideo {
+                        Image(systemName: "play.circle.fill")
+                            .font(.system(size: 28))
+                            .foregroundStyle(.white, .black.opacity(0.45))
                     }
-                    .frame(maxHeight: 170)
-                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.primary.opacity(0.1)))
-                    Spacer(minLength: 0)
                 }
+                .frame(width: Self.fit(image.size).width, height: Self.fit(image.size).height)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.primary.opacity(0.1)))
+                .shadow(color: .black.opacity(0.12), radius: 3, y: 1)
+                .padding(.top, 2)
                 if !clip.files.isEmpty {
-                    Text(clip.title).font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
+                    Text(clip.title).font(.system(size: 12)).foregroundStyle(secondary).lineLimit(1)
                 }
             }
         } else if let url = clip.link {
-            HStack(spacing: 10) {
-                tile
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(url.host ?? url.absoluteString).font(.system(size: 13, weight: .semibold)).lineLimit(1)
-                    Text(url.absoluteString).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
-                }
-                .padding(.trailing, 76)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(url.host ?? url.absoluteString).font(.system(size: 13, weight: .semibold)).foregroundStyle(primary)
+                Text(url.absoluteString).font(.system(size: 11.5)).foregroundStyle(secondary).truncationMode(.middle)
             }
+            .lineLimit(1)
         } else {
-            HStack(alignment: .top, spacing: 10) {
-                tile
-                Text(clip.color != nil ? clip.title.uppercased() : clip.title)
-                    .font(clip.color != nil ? .system(size: 13, weight: .medium, design: .monospaced) : .system(size: 13))
-                    .lineLimit(clip.kind == .files ? 2 : 5)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.top, 4)
-                    .padding(.trailing, 76)
-            }
+            Text(clip.color != nil ? clip.title.uppercased() : clip.title)
+                .font(clip.color != nil ? .system(size: 13, weight: .medium, design: .monospaced) : .system(size: 13))
+                .foregroundStyle(primary)
+                .lineLimit(clip.kind == .files ? 2 : 3)
+                .lineSpacing(1.5)
+                .frame(minHeight: 17, alignment: .leading)
         }
     }
 
-    @ViewBuilder private var tile: some View {
-        if let color = clip.color {
-            RoundedRectangle(cornerRadius: 7, style: .continuous)
-                .fill(Color(nsColor: color))
-                .overlay(RoundedRectangle(cornerRadius: 7, style: .continuous).strokeBorder(Color.primary.opacity(0.15)))
-                .frame(width: 26, height: 26)
-        } else {
-            Image(systemName: symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(tint)
-                .frame(width: 26, height: 26)
-                .background(RoundedRectangle(cornerRadius: 7, style: .continuous).fill(tint.opacity(0.16)))
+    // Thumbnail size: at most 220 × 124 points, keeping the image's shape.
+    private static func fit(_ size: NSSize) -> CGSize {
+        guard size.width > 0, size.height > 0 else { return CGSize(width: 124, height: 124) }
+        let scale = min(220 / size.width, 124 / size.height)
+        return CGSize(width: (size.width * scale).rounded(), height: (size.height * scale).rounded())
+    }
+
+    // A coloured tile for the kind of item, with the source app's icon tucked in the corner.
+    private var tile: some View {
+        ZStack(alignment: .bottomTrailing) {
+            if let color = clip.color {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(Color(nsColor: color))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.primary.opacity(0.15)))
+                    .frame(width: 32, height: 32)
+            } else {
+                Image(systemName: symbol)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(.white)
+                    .frame(width: 32, height: 32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(LinearGradient(colors: [tint.opacity(0.78), tint], startPoint: .top, endPoint: .bottom))
+                    )
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(Color.white.opacity(selected ? 0.7 : 0), lineWidth: 1))
+                    .shadow(color: tint.opacity(0.3), radius: 2, y: 1)
+            }
+            source.offset(x: 5, y: 5)
+        }
+        .frame(width: 37, height: 37, alignment: .topLeading)
+    }
+
+    @ViewBuilder private var source: some View {
+        if clip.fromDevice {
+            Image(systemName: "iphone")
+                .font(.system(size: 8.5, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 17, height: 17)
+                .background(Circle().fill(Color.black.opacity(0.75)))
+                .overlay(Circle().strokeBorder(Color.white.opacity(0.9), lineWidth: 1))
+        } else if let id = clip.sourceApp, let app = AppInfo.lookup(id) {
+            Image(nsImage: app.icon).resizable().frame(width: 18, height: 18)
+                .shadow(color: .black.opacity(0.2), radius: 1, y: 0.5)
         }
     }
 
     private var meta: some View {
         HStack(spacing: 5) {
+            if clip.pinned {
+                Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(selected ? .white : .orange)
+            }
             if clip.fromDevice {
-                Label("iPhone", systemImage: "iphone")
-                    .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(Capsule().fill(Color.accentColor.opacity(0.22)))
-                    .foregroundStyle(Color.primary)
+                Text("iPhone")
             } else if let id = clip.sourceApp, let app = AppInfo.lookup(id) {
-                Image(nsImage: app.icon).resizable().frame(width: 13, height: 13)
                 Text(app.name)
             }
             if clip.fromDevice || clip.sourceApp != nil { Text("·") }
             Text(Self.relative.localizedString(for: clip.date, relativeTo: Date()))
             if clip.isVideo { Text("· Video") }
             Spacer(minLength: 6)
-            if let shortcut {
-                Text("⌘\(shortcut)")
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.primary.opacity(0.18)))
-                    .opacity(hovered || selected ? 1 : 0.7)
-            }
+            trailing
         }
         .font(.system(size: 11))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(secondary)
         .lineLimit(1)
+        .frame(height: 18)
     }
 
-    @ViewBuilder private var badge: some View {
+    @ViewBuilder private var trailing: some View {
         if flashed {
             Label("Copied", systemImage: "checkmark")
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 10.5, weight: .semibold))
                 .padding(.horizontal, 7).padding(.vertical, 2)
                 .background(Capsule().fill(Color.green))
                 .foregroundStyle(.white)
-        } else if clip.pinned && !hovered {
-            Image(systemName: "pin.fill").font(.system(size: 11)).foregroundStyle(.orange)
+        } else if let shortcut, !hovered {
+            Keycap("⌘\(shortcut)", inverted: selected)
         }
+    }
+}
+
+// A small key label, like ⌘1 or ⏎.
+struct Keycap: View {
+    let keys: String
+    var inverted = false
+
+    init(_ keys: String, inverted: Bool = false) {
+        self.keys = keys
+        self.inverted = inverted
+    }
+
+    var body: some View {
+        Text(keys)
+            .font(.system(size: 10, weight: .medium, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(inverted ? Color.white : Color.secondary)
+            .padding(.horizontal, 5)
+            .frame(minWidth: 20, minHeight: 17)
+            .background(RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                .fill(inverted ? Color.white.opacity(0.2) : Color.primary.opacity(0.06)))
+            .overlay(RoundedRectangle(cornerRadius: 4.5, style: .continuous)
+                .strokeBorder(inverted ? Color.white.opacity(0.3) : Color.primary.opacity(0.12), lineWidth: 0.5))
     }
 }
 
@@ -219,12 +264,12 @@ final class HostCell: NSTableCellView {
         removeButton.toolTip = "Remove (Delete)"
         let buttons = NSStackView(views: [pinButton, previewButton, removeButton])
         buttons.spacing = 0
-        buttons.edgeInsets = NSEdgeInsets(top: 0, left: 3, bottom: 0, right: 3)
+        buttons.edgeInsets = NSEdgeInsets(top: 0, left: 2, bottom: 0, right: 2)
         buttons.translatesAutoresizingMaskIntoConstraints = false
         actions.material = .popover
         actions.state = .active
         actions.wantsLayer = true
-        actions.layer?.cornerRadius = 8
+        actions.layer?.cornerRadius = 7
         actions.layer?.borderWidth = 0.5
         actions.layer?.borderColor = NSColor.separatorColor.cgColor
         actions.isHidden = true
@@ -241,8 +286,8 @@ final class HostCell: NSTableCellView {
             buttons.trailingAnchor.constraint(equalTo: actions.trailingAnchor),
             buttons.topAnchor.constraint(equalTo: actions.topAnchor),
             buttons.bottomAnchor.constraint(equalTo: actions.bottomAnchor),
-            actions.topAnchor.constraint(equalTo: topAnchor, constant: 7),
-            actions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -15),
+            actions.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -7),
+            actions.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
         ])
         addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseEnteredAndExited, .activeInActiveApp, .inVisibleRect],
                                        owner: self, userInfo: nil))
@@ -251,7 +296,8 @@ final class HostCell: NSTableCellView {
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
     func configure(_ newRow: ClipRow) {
-        if newRow.clip.id != row.clip.id { hovered = false }
+        // A reused cell (after pinning, removing or filtering) is hovered if the mouse is over it now.
+        if newRow.clip.id != row.clip.id { hovered = mouseIsInside }
         row = newRow
         render()
     }
@@ -270,6 +316,11 @@ final class HostCell: NSTableCellView {
         pinButton.toolTip = row.clip.pinned ? "Unpin" : "Pin to Top"
     }
 
+    private var mouseIsInside: Bool {
+        guard let window, window.isVisible else { return false }
+        return bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
+    }
+
     override func mouseEntered(with event: NSEvent) { setHovered(true) }
     override func mouseExited(with event: NSEvent) { setHovered(false) }
 
@@ -284,10 +335,10 @@ final class HostCell: NSTableCellView {
         let button = NSButton(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage(),
                               target: self, action: action)
         button.isBordered = false
-        button.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 11, weight: .semibold)
+        button.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 10.5, weight: .semibold)
         button.contentTintColor = .secondaryLabelColor
         button.widthAnchor.constraint(equalToConstant: 24).isActive = true
-        button.heightAnchor.constraint(equalToConstant: 22).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 21).isActive = true
         return button
     }
 
@@ -296,7 +347,7 @@ final class HostCell: NSTableCellView {
     @objc private func removeClicked() { onAction(.remove) }
 }
 
-// Section title ("Pinned", "Today"…) between groups of cards.
+// Section title ("Pinned", "Today"…) between groups of rows.
 final class HeaderCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("header")
     private let label = NSTextField(labelWithString: "")
@@ -304,13 +355,13 @@ final class HeaderCell: NSTableCellView {
     init() {
         super.init(frame: .zero)
         identifier = Self.identifier
-        label.font = .systemFont(ofSize: 11, weight: .semibold)
+        label.font = .systemFont(ofSize: 11.5, weight: .semibold)
         label.textColor = .secondaryLabelColor
         label.translatesAutoresizingMaskIntoConstraints = false
         addSubview(label)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -2),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 18),
+            label.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -4),
         ])
     }
 
@@ -318,11 +369,11 @@ final class HeaderCell: NSTableCellView {
 
     var title: String {
         get { label.stringValue }
-        set { label.stringValue = newValue.uppercased() }
+        set { label.stringValue = newValue }
     }
 }
 
-// Rows draw nothing themselves: the cards and headers do.
+// Table rows draw nothing themselves: the hosted rows and headers do.
 final class PlainRowView: NSTableRowView {
     override func drawBackground(in dirtyRect: NSRect) {}
     override func drawSelection(in dirtyRect: NSRect) {}

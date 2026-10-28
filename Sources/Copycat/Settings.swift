@@ -99,31 +99,38 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            Section {
+                header
+            }
+
             Section("General") {
-                Toggle("Open Copycat at login", isOn: $state.openAtLogin)
+                Toggle(isOn: $state.openAtLogin) { SettingLabel("Open Copycat at login", "power", .green) }
                     .onChange(of: state.openAtLogin) { _, on in
                         if on != LoginItem.isEnabled { LoginItem.set(on) }
                         state.refresh()
                     }
-                Toggle("Show the number of new copies on the Dock icon", isOn: $showBadge)
-                LabeledContent("Open the shelf from anywhere") {
-                    Text("⌃ ⌘ V")
-                        .font(.system(size: 12, weight: .medium, design: .rounded))
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(RoundedRectangle(cornerRadius: 5).fill(Color.primary.opacity(0.08)))
+                Toggle(isOn: $showBadge) { SettingLabel("Show new copies on the Dock icon", "app.badge", .red) }
+                LabeledContent {
+                    Keycap("⌃ ⌘ V")
+                } label: {
+                    SettingLabel("Open Copycat from any app", "command", .gray)
                 }
             }
 
             Section {
-                Picker("Keep items for", selection: $keepHours) {
+                Picker(selection: $keepHours) {
                     Text("1 hour").tag(1)
                     Text("1 day").tag(24)
                     Text("1 week").tag(24 * 7)
                     Text("1 month").tag(24 * 30)
                     Text("Until removed").tag(0)
+                } label: {
+                    SettingLabel("Keep items for", "clock", .blue)
                 }
-                Picker("Keep up to", selection: $maxItems) {
+                Picker(selection: $maxItems) {
                     ForEach([25, 50, 100, 200, 500], id: \.self) { Text("\($0) items").tag($0) }
+                } label: {
+                    SettingLabel("Keep up to", "square.stack", .indigo)
                 }
             } header: {
                 Text("History")
@@ -137,7 +144,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("Paste right after choosing an item", isOn: $autoPaste)
+                Toggle(isOn: $autoPaste) { SettingLabel("Paste right after choosing an item", "doc.on.clipboard", .orange) }
                     .onChange(of: autoPaste) { _, on in
                         if on && !AutoPaste.isAllowed { AutoPaste.requestAccess() }
                     }
@@ -158,8 +165,8 @@ struct SettingsView: View {
             }
 
             Section("Privacy") {
-                Label("History stays on this Mac and is never sent anywhere.", systemImage: "lock.fill")
-                Label("Copies that password managers mark as secret are never saved.", systemImage: "key.fill")
+                SettingLabel("History stays on this Mac and is never sent anywhere.", "lock.fill", .teal)
+                SettingLabel("Passwords copied from password managers are never saved.", "key.fill", .pink)
             }
         }
         .formStyle(.grouped)
@@ -175,6 +182,54 @@ struct SettingsView: View {
             Button("Clear History", role: .destructive) { store.clearAll() }
         } message: {
             Text("This removes every item on the shelf, including pinned ones.")
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 14) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 58, height: 58)
+                .shadow(color: .black.opacity(0.15), radius: 3, y: 2)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Copycat").font(.system(size: 17, weight: .semibold))
+                Text("Version \(Self.version)").font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            Spacer()
+            Link(destination: URL(string: "https://github.com/ChavdaUjjval/copycat")!) {
+                Label("GitHub", systemImage: "arrow.up.right.square")
+            }
+            .font(.system(size: 12))
+        }
+        .padding(.vertical, 4)
+    }
+
+    private static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
+    }
+}
+
+// A setting's title with a small coloured icon, like System Settings.
+struct SettingLabel: View {
+    let title: String
+    let symbol: String
+    let color: Color
+
+    init(_ title: String, _ symbol: String, _ color: Color) {
+        self.title = title
+        self.symbol = symbol
+        self.color = color
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 22, height: 22)
+                .background(RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(LinearGradient(colors: [color.opacity(0.8), color], startPoint: .top, endPoint: .bottom)))
+            Text(title)
         }
     }
 }

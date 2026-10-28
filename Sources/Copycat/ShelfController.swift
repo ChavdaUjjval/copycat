@@ -93,6 +93,11 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         window.title = "Copycat"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        // An empty unified toolbar makes the title bar taller, with room for the search field
+        // beside the window buttons.
+        window.toolbar = NSToolbar()
+        window.toolbarStyle = .unified
+        window.titlebarSeparatorStyle = .none
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 360, height: 420)
@@ -111,9 +116,13 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
     }
 
     private func buildUI() {
-        search.placeholderString = "Search your clipboard"
+        search.placeholderString = "Search clipboard history"
         search.sendsSearchStringImmediately = true
-        search.controlSize = .large
+        search.isBezeled = false
+        search.isBordered = false
+        search.drawsBackground = false
+        search.focusRingType = .none
+        search.font = .systemFont(ofSize: 17)
         search.target = self
         search.action = #selector(searchChanged)
         search.delegate = self
@@ -124,7 +133,7 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         table.headerView = nil
         table.style = .plain
         table.backgroundColor = .clear
-        table.intercellSpacing = NSSize(width: 0, height: 8)
+        table.intercellSpacing = NSSize(width: 0, height: 2)
         table.selectionHighlightStyle = .none
         table.allowsMultipleSelection = true
         table.floatsGroupRows = false
@@ -158,14 +167,11 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.automaticallyAdjustsContentInsets = false
-        scroll.contentInsets = NSEdgeInsets(top: 4, left: 4, bottom: 10, right: 4)
+        scroll.contentInsets = NSEdgeInsets(top: 2, left: 0, bottom: 8, right: 0)
 
         let footer = NSHostingView(rootView: FooterBar(store: store, openSettings: { [weak self] in self?.onOpenSettings() }))
-        let header = NSStackView(views: [search, filterBar])
-        header.orientation = .vertical
-        header.spacing = 10
-        header.alignment = .leading
-
+        let topDivider = NSBox()
+        topDivider.boxType = .separator
         let divider = NSBox()
         divider.boxType = .separator
 
@@ -174,25 +180,30 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         content.material = .sidebar
         content.blendingMode = .behindWindow
         content.state = .followsWindowActiveState
-        for v in [header, scroll, divider, footer, emptyView] as [NSView] {
+        for v in [search, topDivider, filterBar, scroll, divider, footer, emptyView] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
         }
+        // The search field sits in the title bar, after the window buttons.
         NSLayoutConstraint.activate([
-            header.topAnchor.constraint(equalTo: content.safeAreaLayoutGuide.topAnchor, constant: 4),
-            header.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
-            header.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            search.widthAnchor.constraint(equalTo: header.widthAnchor),
-            filterBar.widthAnchor.constraint(equalTo: header.widthAnchor),
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
+            search.centerYAnchor.constraint(equalTo: content.topAnchor, constant: 26),
+            search.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 84),
+            search.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
+            topDivider.topAnchor.constraint(equalTo: content.topAnchor, constant: 52),
+            topDivider.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            topDivider.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            filterBar.topAnchor.constraint(equalTo: topDivider.bottomAnchor, constant: 10),
+            filterBar.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
+            filterBar.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            scroll.topAnchor.constraint(equalTo: filterBar.bottomAnchor, constant: 8),
             scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 4),
             scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -4),
             divider.topAnchor.constraint(equalTo: scroll.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            footer.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 7),
-            footer.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
-            footer.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            footer.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 8),
+            footer.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+            footer.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -10),
             footer.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8),
             emptyView.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
             emptyView.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
@@ -235,7 +246,7 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
 
         emptyView.isHidden = !rows.isEmpty
         emptyView.rootView = EmptyState(
-            title: store.clips.isEmpty ? "Nothing on the shelf yet"
+            title: store.clips.isEmpty ? "Nothing copied yet"
                 : !q.isEmpty ? "No matches for “\(q)”" : "Nothing in \(filter.label) yet",
             showTips: store.clips.isEmpty)
     }
@@ -297,7 +308,7 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        guard let clip = clip(at: row) else { return row == 0 ? 18 : 26 }
+        guard let clip = clip(at: row) else { return row == 0 ? 20 : 30 }
         let width = max(200, (tableView.tableColumns.first?.width ?? 400) - 16)
         let key = "\(clip.id)-\(clip.thumb?.count ?? 0)-\(clip.title.count)-\(clip.fromDevice)-\(Int(width))"
         if let h = heightCache[key] { return h }

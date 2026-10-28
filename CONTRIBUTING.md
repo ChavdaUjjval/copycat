@@ -27,8 +27,8 @@ build/Copycat.app/Contents/MacOS/Copycat --screenshot shelf.png [--dark] [--empt
 | `Sources/Copycat/Clip.swift` | The clip model, reading the pasteboard, image conversion |
 | `Sources/Copycat/Store.swift` | History, copying, undo, expiry, storage on disk |
 | `Sources/Copycat/ShelfController.swift` | The shelf window: search, sections, keyboard, Quick Look, menus, drag and drop |
-| `Sources/Copycat/ShelfChrome.swift` | Filter chips, footer, empty state |
-| `Sources/Copycat/ClipRow.swift` | Item cards and their hover buttons |
+| `Sources/Copycat/ShelfChrome.swift` | Filter tabs, footer, empty state |
+| `Sources/Copycat/ClipRow.swift` | Item rows and their hover buttons |
 | `Sources/Copycat/Settings.swift` | Preferences, Settings window, Open at Login, auto-paste |
 | `Sources/Copycat/AppDelegate.swift` | App lifecycle, Dock menu, main menu |
 | `Sources/Copycat/HotKey.swift` | The global ⌃⌘V shortcut |

@@ -13,9 +13,10 @@ final class Store: ObservableObject {
     @Published private(set) var canUndo = false
     var unseen = 0 { didSet { updateBadge() } }
     let undoManager = UndoManager()
+    let pasteboard: NSPasteboard
 
     private let persistent: Bool
-    private var lastChangeCount = NSPasteboard.general.changeCount
+    private var lastChangeCount: Int
     private var receiving: Set<UUID> = []   // clips whose dropped files are still arriving
     private var undoable: Set<UUID> = []    // removed clips whose files are kept while they can be restored
     private var undoExpiry: DispatchWorkItem?
@@ -26,13 +27,18 @@ final class Store: ObservableObject {
 
     init() {
         persistent = true
+        pasteboard = .general
+        lastChangeCount = pasteboard.changeCount
         load()
         expire()
     }
 
-    // A shelf with the given clips that is never read from or written to disk.
+    // A shelf with the given clips that is never read from or written to disk, and copies to a
+    // private pasteboard instead of the Mac's clipboard.
     init(demo clips: [Clip]) {
         persistent = false
+        pasteboard = .withUniqueName()
+        lastChangeCount = pasteboard.changeCount
         self.clips = clips
     }
 
@@ -41,7 +47,7 @@ final class Store: ObservableObject {
     // MARK: Capturing
 
     func poll(windowVisible: Bool) {
-        let pb = NSPasteboard.general
+        let pb = pasteboard
         guard pb.changeCount != lastChangeCount else { return }
         lastChangeCount = pb.changeCount
         guard !paused, var clip = Clip.capture(pb) else { return }
@@ -128,7 +134,7 @@ final class Store: ObservableObject {
 
     func copy(_ list: [Clip]) {
         guard !list.isEmpty else { return }
-        let pb = NSPasteboard.general
+        let pb = pasteboard
         pb.clearContents()
         if list.count > 1 && list.allSatisfy({ $0.kind == .text }) {
             pb.setString(list.compactMap(\.text).joined(separator: "\n"), forType: .string)
@@ -147,7 +153,7 @@ final class Store: ObservableObject {
     func copyPlainText(_ list: [Clip]) {
         let text = list.compactMap(\.text).joined(separator: "\n")
         guard !text.isEmpty else { return }
-        let pb = NSPasteboard.general
+        let pb = pasteboard
         pb.clearContents()
         pb.setString(text, forType: .string)
         lastChangeCount = pb.changeCount
@@ -155,8 +161,8 @@ final class Store: ObservableObject {
 
     // Empties the Mac's clipboard and the shelf. Pinned items stay, since pinning means "keep this".
     func wipeClipboard() {
-        NSPasteboard.general.clearContents()
-        lastChangeCount = NSPasteboard.general.changeCount
+        pasteboard.clearContents()
+        lastChangeCount = pasteboard.changeCount
         let removed = clips.filter { !$0.pinned }
         clips.removeAll { !$0.pinned }
         unseen = 0
