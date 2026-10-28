@@ -11,8 +11,7 @@ enum AppMover {
         let running = Bundle.main.bundleURL
         guard running.pathExtension == "app" else { return false }   // not running from a bundle
         let source = originalURL(ofTranslocated: running) ?? running
-        let userApps = fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
-        if source.path.hasPrefix("/Applications/") || source.path.hasPrefix(userApps.path + "/") { return false }
+        if isInApplications(source) { return false }
 
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
@@ -23,6 +22,7 @@ enum AppMover {
         alert.addButton(withTitle: "Not Now")
         guard alert.runModal() == .alertFirstButtonReturn else { return false }
 
+        let userApps = fm.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
         let appsDir = fm.isWritableFile(atPath: "/Applications") ? URL(fileURLWithPath: "/Applications") : userApps
         let dest = appsDir.appendingPathComponent("Copycat.app")
         do {
@@ -50,6 +50,12 @@ enum AppMover {
             "-c", "while kill -0 \(pid) 2>/dev/null; do sleep 0.1; done; /usr/bin/open \"$0\"", dest.path])
         NSApp.terminate(nil)
         return true
+    }
+
+    // Whether the app is in /Applications or ~/Applications, rather than a disk image or Downloads.
+    static func isInApplications(_ url: URL = Bundle.main.bundleURL) -> Bool {
+        let userApps = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications")
+        return url.path.hasPrefix("/Applications/") || url.path.hasPrefix(userApps.path + "/")
     }
 
     // A freshly downloaded app is run from a random read-only copy ("App Translocation"); this finds

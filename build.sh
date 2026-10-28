@@ -16,6 +16,16 @@ for arg in "$@"; do
   esac
 done
 
+# Building needs Apple's Command Line Tools (or Xcode). If they're missing, open Apple's installer
+# and carry on once it has finished.
+has_tools() { local dir; dir=$(xcode-select -p 2>/dev/null) && [[ -d $dir ]]; }
+if ! has_tools; then
+  echo "Building Copycat needs Apple's Command Line Tools. Opening Apple's installer…"
+  xcode-select --install 2>/dev/null || true
+  echo "Click Install in the window that appears. The build continues when it's done (this can take a few minutes)."
+  until has_tools; do sleep 5; done
+fi
+
 APP=build/Copycat.app
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT

@@ -32,12 +32,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for t in [poll, expire] { RunLoop.main.add(t, forMode: .common) }
         timers = [poll, expire]
 
-        // First launch: open the shelf and start Copycat at login, since it can only
-        // catch copies while running. Turn it off from the Dock icon's menu.
-        if !UserDefaults.standard.bool(forKey: "shownOnce") {
-            UserDefaults.standard.set(true, forKey: "shownOnce")
-            try? SMAppService.mainApp.register()
+        // First launch: open the shelf.
+        let defaults = UserDefaults.standard
+        if !defaults.bool(forKey: "shownOnce") {
+            defaults.set(true, forKey: "shownOnce")
+            defaults.set(false, forKey: "loginItemSetUp")
             showWhenReady = true
+        } else if defaults.object(forKey: "loginItemSetUp") == nil {
+            defaults.set(true, forKey: "loginItemSetUp")   // set up by an earlier version
+        }
+        // Start at login, since Copycat can only catch copies while running. This waits until the
+        // app is in Applications, so the login item never points at a disk image or Downloads.
+        // Turn it off in Settings or the Dock icon's menu.
+        if !defaults.bool(forKey: "loginItemSetUp"), AppMover.isInApplications() {
+            defaults.set(true, forKey: "loginItemSetUp")
+            try? SMAppService.mainApp.register()
         }
         if showWhenReady { show() }
     }

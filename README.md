@@ -10,7 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="../../releases/latest"><b>Download Copycat</b></a> · macOS 14 Sonoma or later · Apple Silicon and Intel
+  <a href="https://github.com/ChavdaUjjval/copycat/releases/latest/download/Copycat.dmg"><img src="https://img.shields.io/badge/Download_for_Mac-Copycat.dmg-F5568A?style=for-the-badge&logo=apple&logoColor=white" alt="Download Copycat for Mac"></a>
+  <br>
+  <sub>Free · macOS 14 Sonoma or later · Apple Silicon and Intel · <a href="#install">Install help</a></sub>
 </p>
 
 <p align="center">
@@ -50,17 +52,37 @@
 
 ## Install
 
-1. Download `Copycat.dmg` from the [latest release](../../releases/latest) and open it.
-2. Drag **Copycat** onto **Applications**.
+You don't need Xcode or any developer tools to install Copycat. Pick either way:
+
+### Option 1: one line in Terminal (easiest)
+
+Open **Terminal** (in Applications → Utilities), paste this and press Return:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ChavdaUjjval/copycat/main/install.sh | bash
+```
+
+It downloads the latest release, puts Copycat in your Applications folder and opens it. You won't see the "can't verify" warning, and running it again updates Copycat to the newest version. You can [read the script](install.sh) first.
+
+### Option 2: download the disk image
+
+1. [Download `Copycat.dmg`](https://github.com/ChavdaUjjval/copycat/releases/latest/download/Copycat.dmg) and open it.
+2. Drag **Copycat** onto **Applications**, then eject the disk image.
 3. Open Copycat from Applications. Copycat isn't notarized by Apple, so the first time macOS says it can't verify the app. Click **Done**, open **System Settings → Privacy & Security**, and click **Open Anyway** next to Copycat. You only do this once.
 
-Copycat then opens its shelf and adds itself to your Login Items, since it can only catch copies while it's running. You can turn this off with **Open at Login** in the Dock icon's menu.
+Either way, Copycat opens its shelf and adds itself to your Login Items, since it can only catch copies while it's running. You can turn this off in Settings or from the Dock icon's menu.
+
+### Uninstall
+
+Quit Copycat (right-click its Dock icon → Quit), then drag it from Applications to the Trash. To also delete your history, remove `~/Library/Application Support/Copycat`.
 
 For iPhone copies, turn on Handoff on both the Mac and the iPhone, and sign in to the same Apple Account on both.
 
 ## Build from source
 
-You need the Xcode Command Line Tools (`xcode-select --install`).
+This is only for developers. To just use Copycat, see [Install](#install).
+
+`build.sh` needs Apple's Command Line Tools. If you don't have them, it opens Apple's installer and continues when they're installed.
 
 ```bash
 ./build.sh
@@ -97,6 +119,7 @@ build/Copycat.app/Contents/MacOS/Copycat --screenshot shelf.png [--dark] [--empt
 | `Sources/Copycat/AppMover.swift` | Offers to move the app into Applications on first launch |
 | `Sources/Copycat/Screenshot.swift` | Renders the shelf with sample items (`--screenshot`) |
 | `Support/Info.plist` | The app bundle's Info.plist |
+| `install.sh` | The one-line installer: downloads the latest release into Applications |
 
 ### Releasing
 
