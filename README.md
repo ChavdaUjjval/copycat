@@ -10,14 +10,16 @@
 </p>
 
 <p align="center">
-  <a href="#install"><img src="https://img.shields.io/badge/Install_for_Mac-one_line_in_Terminal-F5568A?style=for-the-badge&logo=apple&logoColor=white" alt="Install Copycat for Mac"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/Install_for_Mac-Terminal_or_Homebrew-F5568A?style=for-the-badge&logo=apple&logoColor=white" alt="Install Copycat for Mac"></a>
   <br>
   <sub>Free · macOS 14 Sonoma or later · Apple Silicon and Intel</sub>
 </p>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ChavdaUjjval/copycat/main/install.sh | bash
+curl -fsSL https://chavdaujjval.github.io/copycat/install | bash
 ```
+
+<p align="center"><sub>or <code>brew install chavdaujjval/tap/copycat</code> · <a href="#install">what the installer does</a></sub></p>
 
 <p align="center">
   <img src="docs/screenshot-light.png" width="380" alt="The Copycat shelf in light mode">
@@ -56,21 +58,36 @@ curl -fsSL https://raw.githubusercontent.com/ChavdaUjjval/copycat/main/install.s
 
 ## Install
 
-You don't need Xcode or any developer tools to install Copycat. Pick either way:
+You don't need Xcode or any developer tools to install Copycat. Pick any of these:
 
 ### Option 1: one line in Terminal (recommended)
 
 Open **Terminal** (in Applications → Utilities), paste this and press Return:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ChavdaUjjval/copycat/main/install.sh | bash
+curl -fsSL https://chavdaujjval.github.io/copycat/install | bash
 ```
 
-It downloads the latest release, puts Copycat in your Applications folder and opens it. Running it again updates Copycat to the newest version. You can [read the script](install.sh) first.
+It downloads the latest release, puts Copycat in your Applications folder and opens it. Running it again updates Copycat to the newest version.
 
-Copycat isn't notarized by Apple (that needs a paid developer account), so a copy downloaded in a web browser is blocked by macOS at first. The Terminal install avoids that.
+**What the installer does** ([read it](install.sh), it's short):
 
-### Option 2: download the disk image
+- Downloads `Copycat.dmg` and its SHA-256 checksum from this repository's [latest release](../../releases/latest), and stops if they don't match.
+- Copies `Copycat.app` into Applications and opens it. If Copycat is already running, it quits it first; your history and settings are kept.
+- Never asks for your password, never uses `sudo`, and changes nothing else on your Mac.
+- Runs nothing until it has downloaded completely, so a dropped connection can't run half of it.
+
+Copycat isn't notarized by Apple (that needs a paid developer account), so a copy downloaded in a web browser is blocked by macOS at first. The Terminal and Homebrew installs avoid that.
+
+### Option 2: Homebrew
+
+```bash
+brew install chavdaujjval/tap/copycat
+```
+
+Homebrew checks the download against the release's checksum. Update with `brew upgrade copycat`, and remove with `brew uninstall copycat`. The cask lives in [ChavdaUjjval/homebrew-tap](https://github.com/ChavdaUjjval/homebrew-tap).
+
+### Option 3: download the disk image
 
 1. [Download `Copycat.dmg`](https://github.com/ChavdaUjjval/copycat/releases/latest/download/Copycat.dmg) and open it.
 2. Drag **Copycat** onto **Applications**, then eject the disk image.
@@ -84,6 +101,15 @@ xattr -dr com.apple.quarantine /Applications/Copycat.app && open /Applications/C
 ```
 
 Either way, Copycat opens its shelf and adds itself to your Login Items, since it can only catch copies while it's running. You can turn this off in Settings or from the Dock icon's menu.
+
+### Verify a download
+
+Every release's `Copycat.dmg` is built by GitHub Actions from this repository, with a published checksum and a signed [build provenance attestation](https://docs.github.com/actions/security-for-github-actions/using-artifact-attestations). To check a disk image you downloaded:
+
+```bash
+shasum -a 256 -c Copycat.dmg.sha256
+gh attestation verify Copycat.dmg -R ChavdaUjjval/copycat
+```
 
 ### Uninstall
 
@@ -132,11 +158,16 @@ build/Copycat.app/Contents/MacOS/Copycat --screenshot shelf.png [--dark] [--empt
 | `Sources/Copycat/AppMover.swift` | Offers to move the app into Applications on first launch |
 | `Sources/Copycat/Screenshot.swift` | Renders the shelf with sample items (`--screenshot`) |
 | `Support/Info.plist` | The app bundle's Info.plist |
-| `install.sh` | The one-line installer: downloads the latest release into Applications |
+| `install.sh` | The one-line installer, published at `chavdaujjval.github.io/copycat/install` |
+| `scripts/update-homebrew-tap.sh` | Points the Homebrew cask at a new release |
 
 ### Releasing
 
-Push a tag like `v1.0.0`. GitHub Actions builds the DMG and attaches it to a new release.
+1. Bump `CFBundleShortVersionString` and `CFBundleVersion` in `Support/Info.plist`.
+2. Push a tag like `v1.0.2`. GitHub Actions builds the DMG, its checksum and attestation, and publishes the release.
+3. Run `scripts/update-homebrew-tap.sh 1.0.2` to point the Homebrew cask at the new release.
+
+Changes to `install.sh` on `main` are published to the short install link by the Pages workflow.
 
 ## Contributing
 

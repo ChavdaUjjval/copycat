@@ -1,0 +1,47 @@
+# Publishes the installer at https://chavdaujjval.github.io/copycat/install, for the short
+# install command. The page itself just points to the repository.
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: [install.sh, .github/workflows/pages.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build site
+        run: |
+          mkdir _site
+          cp install.sh _site/install
+          cp install.sh _site/install.sh
+          cat > _site/index.html <<'EOF'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>Copycat</title>
+          <meta http-equiv="refresh" content="0; url=https://github.com/ChavdaUjjval/copycat">
+          <a href="https://github.com/ChavdaUjjval/copycat">Copycat on GitHub</a>
+          EOF
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+      - id: deployment
+        uses: actions/deploy-pages@v5
