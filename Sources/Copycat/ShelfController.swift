@@ -53,7 +53,7 @@ final class ShelfTable: NSTableView {
 // MARK: - Shelf window
 
 @MainActor
-final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate,
+final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSTextFieldDelegate,
                              NSMenuDelegate, NSWindowDelegate {
     private enum Row {
         case header(String)
@@ -67,11 +67,15 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
 
     let store: Store
     let window: NSWindow
-    let search = NSSearchField()
+    let search = NSTextField()
     var onCopied: () -> Void = {}
     var onOpenSettings: () -> Void = {}
 
     private let table = ShelfTable()
+    private let titleView = TitleView()
+    private let searchButton = NSButton()
+    private let searchBar = NSView()
+    private let clearButton = NSButton()
     private let filterBar = NSHostingView(rootView: FilterBar())
     private let emptyView = NSHostingView(rootView: EmptyState())
     private var filter = Filter.all
@@ -116,16 +120,7 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
     }
 
     private func buildUI() {
-        search.placeholderString = "Search clipboard history"
-        search.sendsSearchStringImmediately = true
-        search.isBezeled = false
-        search.isBordered = false
-        search.drawsBackground = false
-        search.focusRingType = .none
-        search.font = .systemFont(ofSize: 17)
-        search.target = self
-        search.action = #selector(searchChanged)
-        search.delegate = self
+        buildSearch()
 
         let column = NSTableColumn(identifier: .init("clip"))
         column.resizingMask = .autoresizingMask
@@ -156,7 +151,7 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         table.onSpace = { [weak self] in self?.togglePreview() }
         table.onType = { [weak self] chars in
             guard let self else { return }
-            self.window.makeFirstResponder(self.search)
+            self.showSearch()
             self.search.currentEditor()?.insertText(chars)
             self.reload()
         }
@@ -180,15 +175,21 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         content.material = .sidebar
         content.blendingMode = .behindWindow
         content.state = .followsWindowActiveState
-        for v in [search, topDivider, filterBar, scroll, divider, footer, emptyView] as [NSView] {
+        for v in [titleView, searchButton, searchBar, topDivider, filterBar, scroll, divider, footer, emptyView] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
         }
-        // The search field sits in the title bar, after the window buttons.
+        // The title bar: the app's name in the middle, where the window can be dragged, and a
+        // search button on the right that opens a full-width search bar.
         NSLayoutConstraint.activate([
-            search.centerYAnchor.constraint(equalTo: content.topAnchor, constant: 26),
-            search.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 84),
-            search.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -14),
+            titleView.centerXAnchor.constraint(equalTo: content.centerXAnchor),
+            titleView.centerYAnchor.constraint(equalTo: content.topAnchor, constant: 26),
+            searchButton.centerYAnchor.constraint(equalTo: content.topAnchor, constant: 26),
+            searchButton.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            searchBar.centerYAnchor.constraint(equalTo: content.topAnchor, constant: 26),
+            searchBar.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 84),
+            searchBar.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
+            searchBar.heightAnchor.constraint(equalToConstant: 30),
             topDivider.topAnchor.constraint(equalTo: content.topAnchor, constant: 52),
             topDivider.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             topDivider.trailingAnchor.constraint(equalTo: content.trailingAnchor),
@@ -388,7 +389,104 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         return true
     }
 
-    @objc private func searchChanged() { reload() }
+    // MARK: Search
+
+    private func buildSearch() {
+        searchButton.image = NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: "Search")
+        searchButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        searchButton.isBordered = false
+        searchButton.contentTintColor = .secondaryLabelColor
+        searchButton.toolTip = "Search (⌘F)"
+        searchButton.target = self
+        searchButton.action = #selector(searchClicked)
+        searchButton.widthAnchor.constraint(equalToConstant: 30).isActive = true
+        searchButton.heightAnchor.constraint(equalToConstant: 28).isActive = true
+
+        searchBar.wantsLayer = true
+        searchBar.layer?.cornerRadius = 8
+        searchBar.isHidden = true
+        let icon = NSImageView(image: NSImage(systemSymbolName: "magnifyingglass", accessibilityDescription: nil) ?? NSImage())
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .medium)
+        icon.contentTintColor = .secondaryLabelColor
+
+        search.placeholderString = "Search clipboard history"
+        search.isBordered = false
+        search.drawsBackground = false
+        search.focusRingType = .none
+        search.font = .systemFont(ofSize: 14)
+        search.cell?.isScrollable = true
+        search.cell?.wraps = false
+        search.usesSingleLineMode = true
+        search.delegate = self
+
+        clearButton.image = NSImage(systemSymbolName: "xmark.circle.fill", accessibilityDescription: "Close Search")
+        clearButton.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 13, weight: .regular)
+        clearButton.isBordered = false
+        clearButton.contentTintColor = .tertiaryLabelColor
+        clearButton.toolTip = "Close search (Esc)"
+        clearButton.target = self
+        clearButton.action = #selector(closeSearch)
+
+        for v in [icon, search, clearButton] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            searchBar.addSubview(v)
+        }
+        NSLayoutConstraint.activate([
+            icon.leadingAnchor.constraint(equalTo: searchBar.leadingAnchor, constant: 9),
+            icon.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+            search.leadingAnchor.constraint(equalTo: icon.trailingAnchor, constant: 6),
+            search.trailingAnchor.constraint(equalTo: clearButton.leadingAnchor, constant: -4),
+            search.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+            clearButton.trailingAnchor.constraint(equalTo: searchBar.trailingAnchor, constant: -7),
+            clearButton.centerYAnchor.constraint(equalTo: searchBar.centerYAnchor),
+            clearButton.widthAnchor.constraint(equalToConstant: 18),
+        ])
+        updateSearchBarColors()
+    }
+
+    private func updateSearchBarColors() {
+        window.contentView?.effectiveAppearance.performAsCurrentDrawingAppearance {
+            searchBar.layer?.backgroundColor = NSColor.quaternaryLabelColor.withAlphaComponent(0.12).cgColor
+            searchBar.layer?.borderColor = NSColor.separatorColor.cgColor
+        }
+        searchBar.layer?.borderWidth = 0.5
+    }
+
+    var isSearching: Bool { !searchBar.isHidden }
+
+    // Opens the search bar over the title and puts the cursor in it.
+    func showSearch() {
+        if searchBar.isHidden {
+            updateSearchBarColors()
+            searchBar.isHidden = false
+            titleView.isHidden = true
+            searchButton.isHidden = true
+        }
+        window.makeFirstResponder(search)
+    }
+
+    // Clears and closes the search bar, back to the title.
+    @objc func closeSearch() {
+        guard isSearching || !search.stringValue.isEmpty else { return }
+        let wasSearching = !search.stringValue.isEmpty
+        search.stringValue = ""
+        searchBar.isHidden = true
+        titleView.isHidden = false
+        searchButton.isHidden = false
+        if window.firstResponder === search.currentEditor() || window.firstResponder === search {
+            window.makeFirstResponder(table)
+        }
+        if wasSearching { reload() }
+    }
+
+    @objc private func searchClicked() { showSearch() }
+
+    func controlTextDidChange(_ obj: Notification) { reload() }
+
+    // Clicking away from an empty search bar closes it.
+    func controlTextDidEndEditing(_ obj: Notification) {
+        if search.stringValue.isEmpty { closeSearch() }
+    }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
@@ -401,7 +499,7 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
             copySelection()
             return true
         case #selector(NSResponder.cancelOperation(_:)):
-            if search.stringValue.isEmpty { NSApp.hide(nil) } else { search.stringValue = ""; reload() }
+            if search.stringValue.isEmpty { closeSearch() } else { search.stringValue = ""; reload() }
             return true
         default:
             return false
@@ -409,7 +507,7 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
     }
 
     func focusForKeyboard() {
-        search.stringValue = ""
+        closeSearch()
         reload()
         window.makeFirstResponder(table)
         if let first = firstClipRow {
@@ -552,6 +650,28 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         table.selectRowIndexes([clipRows[2]], byExtendingSelection: false)
         (table.view(atColumn: 0, row: clipRows[1], makeIfNecessary: true) as? HostCell)?.setHovered(true)
     }
+}
+
+// MARK: - Title
+
+// The app's icon and name in the middle of the title bar. It ignores clicks, so dragging it
+// moves the window and double-clicking it zooms, as with any title bar.
+final class TitleView: NSStackView {
+    init() {
+        let icon = NSImageView(image: NSApp.applicationIconImage)
+        icon.widthAnchor.constraint(equalToConstant: 18).isActive = true
+        icon.heightAnchor.constraint(equalToConstant: 18).isActive = true
+        let name = NSTextField(labelWithString: "Copycat")
+        name.font = .systemFont(ofSize: 13, weight: .semibold)
+        super.init(frame: .zero)
+        orientation = .horizontal
+        spacing = 6
+        setViews([icon, name], in: .center)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
 // MARK: - Quick Look

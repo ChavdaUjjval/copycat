@@ -194,7 +194,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func focusSearch() {
-        guard let shelf else { return }
-        shelf.window.makeFirstResponder(shelf.search)
+        shelf?.showSearch()
     }
 }
