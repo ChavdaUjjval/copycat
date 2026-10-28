@@ -10,10 +10,14 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ChavdaUjjval/copycat/releases/latest/download/Copycat.dmg"><img src="https://img.shields.io/badge/Download_for_Mac-Copycat.dmg-F5568A?style=for-the-badge&logo=apple&logoColor=white" alt="Download Copycat for Mac"></a>
+  <a href="#install"><img src="https://img.shields.io/badge/Install_for_Mac-one_line_in_Terminal-F5568A?style=for-the-badge&logo=apple&logoColor=white" alt="Install Copycat for Mac"></a>
   <br>
-  <sub>Free · macOS 14 Sonoma or later · Apple Silicon and Intel · <a href="#install">Install help</a></sub>
+  <sub>Free · macOS 14 Sonoma or later · Apple Silicon and Intel</sub>
 </p>
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/ChavdaUjjval/copycat/main/install.sh | bash
+```
 
 <p align="center">
   <img src="docs/screenshot-light.png" width="380" alt="The Copycat shelf in light mode">
@@ -54,7 +58,7 @@
 
 You don't need Xcode or any developer tools to install Copycat. Pick either way:
 
-### Option 1: one line in Terminal (easiest)
+### Option 1: one line in Terminal (recommended)
 
 Open **Terminal** (in Applications → Utilities), paste this and press Return:
 
@@ -62,13 +66,22 @@ Open **Terminal** (in Applications → Utilities), paste this and press Return:
 curl -fsSL https://raw.githubusercontent.com/ChavdaUjjval/copycat/main/install.sh | bash
 ```
 
-It downloads the latest release, puts Copycat in your Applications folder and opens it. You won't see the "can't verify" warning, and running it again updates Copycat to the newest version. You can [read the script](install.sh) first.
+It downloads the latest release, puts Copycat in your Applications folder and opens it. Running it again updates Copycat to the newest version. You can [read the script](install.sh) first.
+
+Copycat isn't notarized by Apple (that needs a paid developer account), so a copy downloaded in a web browser is blocked by macOS at first. The Terminal install avoids that.
 
 ### Option 2: download the disk image
 
 1. [Download `Copycat.dmg`](https://github.com/ChavdaUjjval/copycat/releases/latest/download/Copycat.dmg) and open it.
 2. Drag **Copycat** onto **Applications**, then eject the disk image.
-3. Open Copycat from Applications. Copycat isn't notarized by Apple, so the first time macOS says it can't verify the app. Click **Done**, open **System Settings → Privacy & Security**, and click **Open Anyway** next to Copycat. You only do this once.
+3. Open Copycat from Applications. macOS says *"Copycat" Not Opened* because the app isn't notarized. Click **Done**.
+4. Open **System Settings → Privacy & Security**, scroll down to **Security**, and click **Open Anyway** next to the message about Copycat. Enter your password and click **Open Anyway** again. You only do this once.
+
+If you don't see **Open Anyway**, paste this into Terminal instead. It clears the download flag that macOS checks:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/Copycat.app && open /Applications/Copycat.app
+```
 
 Either way, Copycat opens its shelf and adds itself to your Login Items, since it can only catch copies while it's running. You can turn this off in Settings or from the Dock icon's menu.
 
