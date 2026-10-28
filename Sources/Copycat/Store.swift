@@ -10,17 +10,30 @@ final class Store: ObservableObject {
     @Published var flashed: UUID?
     @Published var paused = false
     @Published private(set) var notice: String?
-    var unseen = 0 { didSet { NSApp.dockTile.badgeLabel = unseen > 0 ? "\(unseen)" : nil } }
+    @Published private(set) var canUndo = false
+    var unseen = 0 { didSet { updateBadge() } }
+    let undoManager = UndoManager()
 
+    private let persistent: Bool
     private var lastChangeCount = NSPasteboard.general.changeCount
     private var receiving: Set<UUID> = []   // clips whose dropped files are still arriving
+    private var undoable: Set<UUID> = []    // removed clips whose files are kept while they can be restored
+    private var undoExpiry: DispatchWorkItem?
+    private var noticeExpiry: DispatchWorkItem?
     private var saveScheduled = false
     private let writer = DispatchQueue(label: "Copycat.store", qos: .utility)
     private let promiseQueue = OperationQueue()
 
     init() {
+        persistent = true
         load()
         expire()
+    }
+
+    // A shelf with the given clips that is never read from or written to disk.
+    init(demo clips: [Clip]) {
+        persistent = false
+        self.clips = clips
     }
 
     var ordered: [Clip] { clips.filter(\.pinned) + clips.filter { !$0.pinned } }
@@ -144,17 +157,58 @@ final class Store: ObservableObject {
     func wipeClipboard() {
         NSPasteboard.general.clearContents()
         lastChangeCount = NSPasteboard.general.changeCount
+        let removed = clips.filter { !$0.pinned }
         clips.removeAll { !$0.pinned }
         unseen = 0
         save()
-        flash(notice: "Clipboard and shelf wiped")
+        offerUndo(removed, notice: "Clipboard wiped")
     }
 
-    func flash(notice text: String) {
+    func flash(notice text: String, seconds: Double = 1.5) {
         notice = text
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            MainActor.assumeIsolated { if self.notice == text { self.notice = nil } }
+        noticeExpiry?.cancel()
+        let work = DispatchWorkItem { MainActor.assumeIsolated { self.notice = nil } }
+        noticeExpiry = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds, execute: work)
+    }
+
+    // MARK: Undo
+
+    // Removed items can be put back for a few seconds, from the footer or with ⌘Z.
+    private func offerUndo(_ removed: [Clip], notice text: String) {
+        guard !removed.isEmpty else { return }
+        undoManager.removeAllActions(withTarget: self)
+        undoManager.registerUndo(withTarget: self) { store in
+            MainActor.assumeIsolated { store.restore(removed) }
         }
+        undoManager.setActionName(text)
+        undoable = Set(removed.map(\.id))
+        canUndo = true
+        flash(notice: text, seconds: 8)
+        undoExpiry?.cancel()
+        let work = DispatchWorkItem { MainActor.assumeIsolated { self.dropUndo() } }
+        undoExpiry = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
+    }
+
+    func undo() {
+        if undoManager.canUndo { undoManager.undo() }
+    }
+
+    private func restore(_ removed: [Clip]) {
+        let present = Set(clips.map(\.id))
+        clips += removed.filter { !present.contains($0.id) }
+        clips.sort { $0.date > $1.date }
+        dropUndo()
+        flash(notice: removed.count == 1 ? "Item restored" : "\(removed.count) items restored")
+    }
+
+    private func dropUndo() {
+        undoExpiry?.cancel()
+        undoManager.removeAllActions(withTarget: self)
+        undoable = []
+        canUndo = false
+        save()
     }
 
     private static func pasteboardItem(_ dict: [String: Data]) -> NSPasteboardItem {
@@ -191,15 +245,40 @@ final class Store: ObservableObject {
 
     func remove(_ list: [Clip]) {
         let ids = Set(list.map(\.id))
+        let removed = clips.filter { ids.contains($0.id) }
         clips.removeAll { ids.contains($0.id) }
         save()
+        offerUndo(removed, notice: removed.count == 1 ? "Item removed" : "\(removed.count) items removed")
+    }
+
+    // Removes everything, pinned items included.
+    func clearAll() {
+        clips.removeAll()
+        unseen = 0
+        dropUndo()
+        flash(notice: "History cleared")
     }
 
     func expire() {
-        let cutoff = Date().addingTimeInterval(-Limits.expiry)
+        let hours = Preferences.keepHours
+        guard hours > 0 else { return }
+        let cutoff = Date().addingTimeInterval(-Double(hours) * 3600)
         let before = clips.count
         clips.removeAll { !$0.pinned && $0.date < cutoff }
         if clips.count != before { save() }
+    }
+
+    // Applies changed settings right away rather than at the next copy.
+    func applyPreferences() {
+        expire()
+        let before = clips.count
+        trim()
+        if clips.count != before { save() }
+        updateBadge()
+    }
+
+    private func updateBadge() {
+        NSApp.dockTile.badgeLabel = unseen > 0 && Preferences.showBadge ? "\(unseen)" : nil
     }
 
     // MARK: Files for drag-out
@@ -255,7 +334,7 @@ final class Store: ObservableObject {
             total += c.bytes
             if c.pinned { return true }
             unpinned += 1
-            return unpinned <= Limits.unpinnedItems && total <= Limits.storeBytes
+            return unpinned <= Preferences.maxItems && total <= Limits.storeBytes
         }
     }
 
@@ -268,7 +347,7 @@ final class Store: ObservableObject {
 
     // Changes are batched and written in the background, so a burst of edits costs one write.
     private func save() {
-        guard !saveScheduled else { return }
+        guard persistent, !saveScheduled else { return }
         saveScheduled = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
             MainActor.assumeIsolated { self.flush() }
@@ -298,7 +377,7 @@ final class Store: ObservableObject {
 
     // Deletes stored files whose clip is no longer on the shelf.
     private func removeOrphanedFiles() {
-        let live = Set((clips.map(\.id) + receiving).map(\.uuidString))
+        let live = Set((clips.map(\.id) + receiving + undoable).map(\.uuidString))
         let fm = FileManager.default
         for base in [Storage.keptFiles, Storage.exports] {
             for name in (try? fm.contentsOfDirectory(atPath: base.path)) ?? [] where !live.contains(name) {

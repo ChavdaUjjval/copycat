@@ -1,14 +1,17 @@
 import AppKit
 import Combine
+import Quartz
 import SwiftUI
 
-// MARK: - Table: keyboard and ⌘C
+// MARK: - Table: keyboard, ⌘C and Quick Look
 
 final class ShelfTable: NSTableView {
     var onReturn: () -> Void = {}
     var onEscape: () -> Void = {}
     var onDelete: () -> Void = {}
+    var onSpace: () -> Void = {}
     var onType: (String) -> Void = { _ in }
+    weak var previewSource: (any QLPreviewPanelDataSource & QLPreviewPanelDelegate)?
 
     override func keyDown(with event: NSEvent) {
         let mods = event.modifierFlags.intersection([.command, .control, .option])
@@ -16,6 +19,7 @@ final class ShelfTable: NSTableView {
         case 36, 76: onReturn()   // Return, Enter
         case 53: onEscape()       // Esc
         case 51, 117: onDelete()  // Delete, Forward Delete
+        case 49: onSpace()        // Space
         default:
             if mods.isEmpty, let chars = event.characters, !chars.isEmpty,
                chars.unicodeScalars.allSatisfy(CharacterSet.alphanumerics.contains) {
@@ -27,23 +31,21 @@ final class ShelfTable: NSTableView {
     }
 
     @objc func copy(_ sender: Any?) { onReturn() }
-}
 
-// MARK: - Filters
+    override func acceptsPreviewPanelControl(_ panel: QLPreviewPanel!) -> Bool { true }
 
-enum Filter: Int, CaseIterable {
-    case all, text, media, files, iPhone
+    // Quick Look calls these on the main thread.
+    override func beginPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        MainActor.assumeIsolated {
+            panel.dataSource = previewSource
+            panel.delegate = previewSource
+        }
+    }
 
-    var label: String { ["All", "Text", "Media", "Files", "iPhone"][rawValue] }
-    var symbol: String { ["square.grid.2x2", "text.alignleft", "photo", "doc", "iphone"][rawValue] }
-
-    func matches(_ c: Clip) -> Bool {
-        switch self {
-        case .all: return true
-        case .text: return c.kind == .text
-        case .media: return c.kind == .media
-        case .files: return c.kind == .files
-        case .iPhone: return c.fromDevice
+    override func endPreviewPanelControl(_ panel: QLPreviewPanel!) {
+        MainActor.assumeIsolated {
+            panel.dataSource = nil
+            panel.delegate = nil
         }
     }
 }
@@ -51,28 +53,40 @@ enum Filter: Int, CaseIterable {
 // MARK: - Shelf window
 
 @MainActor
-final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSMenuDelegate {
+final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate,
+                             NSMenuDelegate, NSWindowDelegate {
+    private enum Row {
+        case header(String)
+        case clip(Clip, shortcut: Int?)
+
+        var clip: Clip? {
+            if case .clip(let c, _) = self { return c }
+            return nil
+        }
+    }
+
     let store: Store
     let window: NSWindow
     let search = NSSearchField()
     var onCopied: () -> Void = {}
+    var onOpenSettings: () -> Void = {}
 
     private let table = ShelfTable()
-    private let filterControl = NSSegmentedControl()
-    private let noticeLabel = NSTextField(labelWithString: "")
-    private let countLabel = NSTextField(labelWithString: "")
-    private let emptyTitle = NSTextField(labelWithString: "")
-    private let emptyView = NSStackView()
-    private var rows: [Clip] = []
+    private let filterBar = NSHostingView(rootView: FilterBar())
+    private let emptyView = NSHostingView(rootView: EmptyState())
+    private var filter = Filter.all
+    private var rows: [Row] = []
     private var shownSelection = IndexSet()
+    private var previewURLs: [URL] = []
     private var reloadScheduled = false
     private var subscriptions: Set<AnyCancellable> = []
-    private let measurer = NSHostingController(rootView: ClipRow(clip: Clip(), flashed: false, selected: false))
+    private var keyMonitor: Any?
+    private let measurer = NSHostingController(rootView: ClipRow(clip: Clip()))
     private var heightCache: [String: CGFloat] = [:]
 
     init(store: Store) {
         self.store = store
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 400, height: 600),
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 640),
                           styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
                           backing: .buffered, defer: false)
         super.init()
@@ -81,36 +95,28 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         window.titlebarAppearsTransparent = true
         window.isMovableByWindowBackground = true
         window.isReleasedWhenClosed = false
-        window.minSize = NSSize(width: 340, height: 380)
+        window.minSize = NSSize(width: 360, height: 420)
+        window.delegate = self
         buildUI()
         if !window.setFrameUsingName("CopycatWindow") { window.center() }
         window.setFrameAutosaveName("CopycatWindow")
         store.objectWillChange
             .sink { [weak self] _ in MainActor.assumeIsolated { self?.setNeedsReload() } }
             .store(in: &subscriptions)
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let handled = MainActor.assumeIsolated { self?.handleShortcut(event) ?? false }
+            return handled ? nil : event
+        }
         reload()
     }
 
     private func buildUI() {
-        search.placeholderString = "Search"
+        search.placeholderString = "Search your clipboard"
         search.sendsSearchStringImmediately = true
         search.controlSize = .large
         search.target = self
         search.action = #selector(searchChanged)
         search.delegate = self
-
-        filterControl.segmentCount = Filter.allCases.count
-        filterControl.trackingMode = .selectOne
-        for filter in Filter.allCases {
-            let i = filter.rawValue
-            filterControl.setLabel(filter.label, forSegment: i)
-            filterControl.setImage(NSImage(systemSymbolName: filter.symbol, accessibilityDescription: filter.label), forSegment: i)
-            filterControl.setImageScaling(.scaleProportionallyDown, forSegment: i)
-        }
-        filterControl.selectedSegment = Filter.all.rawValue
-        filterControl.segmentDistribution = .fillEqually
-        filterControl.target = self
-        filterControl.action = #selector(filterChanged)
 
         let column = NSTableColumn(identifier: .init("clip"))
         column.resizingMask = .autoresizingMask
@@ -121,12 +127,14 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         table.intercellSpacing = NSSize(width: 0, height: 8)
         table.selectionHighlightStyle = .none
         table.allowsMultipleSelection = true
+        table.floatsGroupRows = false
         table.focusRingType = .none
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         table.dataSource = self
         table.delegate = self
         table.target = self
         table.action = #selector(rowClicked)
+        table.previewSource = self
         table.setDraggingSourceOperationMask(.copy, forLocal: false)
         table.registerForDraggedTypes([.fileURL, .URL, .string, .rtf, .html, .png, .tiff]
             + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) })
@@ -136,6 +144,7 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         table.onReturn = { [weak self] in self?.copySelection() }
         table.onEscape = { NSApp.hide(nil) }
         table.onDelete = { [weak self] in guard let self else { return }; self.store.remove(self.targetClips()) }
+        table.onSpace = { [weak self] in self?.togglePreview() }
         table.onType = { [weak self] chars in
             guard let self else { return }
             self.window.makeFirstResponder(self.search)
@@ -149,46 +158,10 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         scroll.autohidesScrollers = true
         scroll.drawsBackground = false
         scroll.automaticallyAdjustsContentInsets = false
-        scroll.contentInsets = NSEdgeInsets(top: 10, left: 4, bottom: 10, right: 4)
+        scroll.contentInsets = NSEdgeInsets(top: 4, left: 4, bottom: 10, right: 4)
 
-        // Empty state
-        let emptyIcon = NSImageView()
-        emptyIcon.image = NSImage(systemSymbolName: "list.clipboard", accessibilityDescription: nil)
-        emptyIcon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: 34, weight: .light)
-        emptyIcon.contentTintColor = .tertiaryLabelColor
-        emptyTitle.font = .systemFont(ofSize: 13, weight: .medium)
-        emptyTitle.textColor = .secondaryLabelColor
-        let emptyHint = NSTextField(wrappingLabelWithString: "Copy on your Mac or iPhone, or drop text, photos and videos here.")
-        emptyHint.font = .systemFont(ofSize: 11)
-        emptyHint.textColor = .tertiaryLabelColor
-        emptyHint.alignment = .center
-        emptyHint.preferredMaxLayoutWidth = 240
-        for v in [emptyIcon, emptyTitle, emptyHint] { emptyView.addArrangedSubview(v) }
-        emptyView.orientation = .vertical
-        emptyView.alignment = .centerX
-        emptyView.spacing = 6
-
-        // Footer: item count · hints / notices · Wipe Clipboard
-        let wipe = NSButton(title: "Wipe Clipboard", target: self, action: #selector(wipeClipboard))
-        wipe.image = NSImage(systemSymbolName: "eraser", accessibilityDescription: nil)
-        wipe.imagePosition = .imageLeading
-        wipe.bezelStyle = .push
-        wipe.controlSize = .small
-        wipe.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
-        wipe.toolTip = "Empty the Mac's clipboard and the shelf (pinned items stay)"
-        for label in [countLabel, noticeLabel] {
-            label.font = .systemFont(ofSize: 11)
-            label.textColor = .secondaryLabelColor
-            label.lineBreakMode = .byTruncatingTail
-            label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        }
-        noticeLabel.alignment = .center
-        noticeLabel.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let footer = NSStackView(views: [countLabel, noticeLabel, wipe])
-        footer.distribution = .fill
-        footer.spacing = 8
-
-        let header = NSStackView(views: [search, filterControl])
+        let footer = NSHostingView(rootView: FooterBar(store: store, openSettings: { [weak self] in self?.onOpenSettings() }))
+        let header = NSStackView(views: [search, filterBar])
         header.orientation = .vertical
         header.spacing = 10
         header.alignment = .leading
@@ -210,23 +183,25 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
             header.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             header.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
             search.widthAnchor.constraint(equalTo: header.widthAnchor),
-            filterControl.widthAnchor.constraint(equalTo: header.widthAnchor),
-            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 6),
+            filterBar.widthAnchor.constraint(equalTo: header.widthAnchor),
+            scroll.topAnchor.constraint(equalTo: header.bottomAnchor, constant: 8),
             scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 4),
             scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -4),
             divider.topAnchor.constraint(equalTo: scroll.bottomAnchor),
             divider.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             divider.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            footer.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 8),
-            footer.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 14),
+            footer.topAnchor.constraint(equalTo: divider.bottomAnchor, constant: 7),
+            footer.leadingAnchor.constraint(equalTo: content.leadingAnchor, constant: 12),
             footer.trailingAnchor.constraint(equalTo: content.trailingAnchor, constant: -12),
-            footer.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -10),
+            footer.bottomAnchor.constraint(equalTo: content.bottomAnchor, constant: -8),
             emptyView.centerXAnchor.constraint(equalTo: scroll.centerXAnchor),
             emptyView.centerYAnchor.constraint(equalTo: scroll.centerYAnchor),
-            emptyView.widthAnchor.constraint(lessThanOrEqualTo: scroll.widthAnchor, constant: -40),
+            emptyView.widthAnchor.constraint(lessThanOrEqualTo: scroll.widthAnchor),
         ])
         window.contentView = content
     }
+
+    func windowWillReturnUndoManager(_ window: NSWindow) -> UndoManager? { store.undoManager }
 
     // MARK: Data
 
@@ -243,38 +218,90 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
     }
 
     func reload() {
-        let selectedIDs = Set(table.selectedRowIndexes.compactMap { $0 < rows.count ? rows[$0].id : nil })
-        let filter = Filter(rawValue: filterControl.selectedSegment) ?? .all
+        let selectedIDs = Set(table.selectedRowIndexes.compactMap { clip(at: $0)?.id })
+        let all = store.ordered
+        var counts: [Filter: Int] = [:]
+        for f in Filter.allCases { counts[f] = all.filter(f.matches).count }
         let q = search.stringValue
-        rows = store.ordered.filter { filter.matches($0) && (q.isEmpty || $0.title.localizedCaseInsensitiveContains(q)) }
+        let matches = all.filter { filter.matches($0) && (q.isEmpty || $0.title.localizedCaseInsensitiveContains(q)) }
+        rows = Self.sections(matches)
+
         table.reloadData()
-        table.selectRowIndexes(IndexSet(rows.indices.filter { selectedIDs.contains(rows[$0].id) }), byExtendingSelection: false)
+        table.selectRowIndexes(IndexSet(rows.indices.filter { rows[$0].clip.map { selectedIDs.contains($0.id) } ?? false }),
+                               byExtendingSelection: false)
         shownSelection = table.selectedRowIndexes
+        filterBar.rootView = FilterBar(counts: counts, selected: filter) { [weak self] in self?.select($0) }
+        filterBar.isHidden = all.isEmpty
+
         emptyView.isHidden = !rows.isEmpty
-        emptyTitle.stringValue = store.clips.isEmpty ? "Nothing on the shelf yet"
-            : !q.isEmpty ? "No matches for “\(q)”" : "Nothing here yet"
-        let n = store.clips.count
-        countLabel.stringValue = n == 1 ? "1 item" : "\(n) items"
-        noticeLabel.stringValue = store.notice ?? (store.paused ? "Capturing paused" : "⏎ copy · drag to share · ⌃⌘V")
-        noticeLabel.textColor = store.notice != nil ? .systemGreen : store.paused ? .systemOrange : .tertiaryLabelColor
+        emptyView.rootView = EmptyState(
+            title: store.clips.isEmpty ? "Nothing on the shelf yet"
+                : !q.isEmpty ? "No matches for “\(q)”" : "Nothing in \(filter.label) yet",
+            showTips: store.clips.isEmpty)
+    }
+
+    // Pinned items, then Today / Yesterday / Earlier. Headers only appear when there's more than one group.
+    private static func sections(_ clips: [Clip]) -> [Row] {
+        let calendar = Calendar.current
+        func section(_ c: Clip) -> String {
+            if c.pinned { return "Pinned" }
+            if calendar.isDateInToday(c.date) { return "Today" }
+            if calendar.isDateInYesterday(c.date) { return "Yesterday" }
+            return "Earlier"
+        }
+        let titles = clips.map(section)
+        let showHeaders = Set(titles).count > 1
+        var rows: [Row] = []
+        for (i, clip) in clips.enumerated() {
+            if showHeaders && (i == 0 || titles[i] != titles[i - 1]) { rows.append(.header(titles[i])) }
+            rows.append(.clip(clip, shortcut: i < 9 ? i + 1 : nil))
+        }
+        return rows
+    }
+
+    private func clip(at row: Int) -> Clip? { row >= 0 && row < rows.count ? rows[row].clip : nil }
+
+    private var firstClipRow: Int? { rows.firstIndex { $0.clip != nil } }
+
+    private func select(_ newFilter: Filter) {
+        filter = newFilter
+        reload()
     }
 
     func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
 
+    func tableView(_ tableView: NSTableView, isGroupRow row: Int) -> Bool { rows[row].clip == nil }
+
+    func tableView(_ tableView: NSTableView, shouldSelectRow row: Int) -> Bool { rows[row].clip != nil }
+
+    func tableView(_ tableView: NSTableView, selectionIndexesForProposedSelection proposed: IndexSet) -> IndexSet {
+        proposed.filteredIndexSet { clip(at: $0) != nil }
+    }
+
+    func tableView(_ tableView: NSTableView, rowViewForRow row: Int) -> NSTableRowView? { PlainRowView() }
+
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
-        let cell = tableView.makeView(withIdentifier: HostCell.identifier, owner: nil) as? HostCell ?? HostCell()
-        let clip = rows[row]
-        cell.host.rootView = ClipRow(clip: clip, flashed: store.flashed == clip.id,
-                                     selected: tableView.selectedRowIndexes.contains(row))
-        return cell
+        switch rows[row] {
+        case .header(let title):
+            let cell = tableView.makeView(withIdentifier: HeaderCell.identifier, owner: nil) as? HeaderCell ?? HeaderCell()
+            cell.title = title
+            return cell
+        case .clip(let clip, let shortcut):
+            let cell = tableView.makeView(withIdentifier: HostCell.identifier, owner: nil) as? HostCell ?? HostCell()
+            cell.configure(ClipRow(clip: clip, shortcut: shortcut, flashed: store.flashed == clip.id,
+                                   selected: tableView.selectedRowIndexes.contains(row)))
+            let id = clip.id
+            cell.onAction = { [weak self] action in self?.perform(action, on: id) }
+            return cell
+        }
     }
 
     func tableView(_ tableView: NSTableView, heightOfRow row: Int) -> CGFloat {
-        let clip = rows[row]
-        let width = max(200, (tableView.tableColumns.first?.width ?? 380) - 16)
+        guard let clip = clip(at: row) else { return row == 0 ? 18 : 26 }
+        let width = max(200, (tableView.tableColumns.first?.width ?? 400) - 16)
         let key = "\(clip.id)-\(clip.thumb?.count ?? 0)-\(clip.title.count)-\(clip.fromDevice)-\(Int(width))"
         if let h = heightCache[key] { return h }
-        measurer.rootView = ClipRow(clip: clip, flashed: false, selected: false)
+        measurer.rootView = ClipRow(clip: clip, shortcut: 1)
         let h = ceil(measurer.sizeThatFits(in: CGSize(width: width, height: 10_000)).height)
         heightCache[key] = h
         return h
@@ -291,30 +318,41 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         let changed = shownSelection.symmetricDifference(selection).filteredIndexSet { $0 < rows.count }
         shownSelection = selection
         if !changed.isEmpty { table.reloadData(forRowIndexes: changed, columnIndexes: [0]) }
+        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible { refreshPreview() }
     }
 
     // Selected rows, or the right-clicked row if it isn't part of the selection.
     private func targetClips() -> [Clip] {
         let clicked = table.clickedRow
-        if clicked >= 0 && clicked < rows.count && !table.selectedRowIndexes.contains(clicked) {
-            return [rows[clicked]]
-        }
-        return table.selectedRowIndexes.compactMap { $0 < rows.count ? rows[$0] : nil }
+        if let c = clip(at: clicked), !table.selectedRowIndexes.contains(clicked) { return [c] }
+        return table.selectedRowIndexes.compactMap(clip(at:))
     }
 
     // MARK: Actions
 
     @objc private func rowClicked() {
-        let row = table.clickedRow
-        guard row >= 0, row < rows.count else { return }
+        guard let c = clip(at: table.clickedRow) else { return }
         let mods = NSApp.currentEvent?.modifierFlags ?? []
         if mods.contains(.command) || mods.contains(.shift) { return }   // building a multi-selection
-        copyAndHide([rows[row]])
+        copyAndHide([c])
+    }
+
+    private func perform(_ action: RowAction, on id: UUID) {
+        guard let clip = store.clips.first(where: { $0.id == id }) else { return }
+        switch action {
+        case .pin: store.togglePin([clip])
+        case .remove: store.remove([clip])
+        case .preview:
+            guard let row = rows.firstIndex(where: { $0.clip?.id == id }) else { return }
+            window.makeFirstResponder(table)
+            table.selectRowIndexes([row], byExtendingSelection: false)
+            showPreview()
+        }
     }
 
     private func copySelection() {
-        var list = table.selectedRowIndexes.compactMap { $0 < rows.count ? rows[$0] : nil }
-        if list.isEmpty, let first = rows.first { list = [first] }
+        var list = table.selectedRowIndexes.compactMap(clip(at:))
+        if list.isEmpty, let first = firstClipRow.flatMap(clip(at:)) { list = [first] }
         copyAndHide(list)
     }
 
@@ -325,16 +363,28 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         onCopied()
     }
 
+    // ⌘1…⌘9 copy the first nine items shown.
+    private func handleShortcut(_ event: NSEvent) -> Bool {
+        guard event.window === window,
+              event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+              let n = event.charactersIgnoringModifiers.flatMap(Int.init), (1...9).contains(n),
+              let c = rows.lazy.compactMap({ row -> Clip? in
+                  if case .clip(let c, let s) = row, s == n { return c }
+                  return nil
+              }).first
+        else { return false }
+        copyAndHide([c])
+        return true
+    }
+
     @objc private func searchChanged() { reload() }
-    @objc private func filterChanged() { reload() }
-    @objc private func wipeClipboard() { store.wipeClipboard() }
 
     func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
         switch selector {
         case #selector(NSResponder.moveDown(_:)):
-            guard !rows.isEmpty else { return true }
+            guard let first = firstClipRow else { return true }
             window.makeFirstResponder(table)
-            if table.selectedRowIndexes.isEmpty { table.selectRowIndexes([0], byExtendingSelection: false) }
+            if table.selectedRowIndexes.isEmpty { table.selectRowIndexes([first], byExtendingSelection: false) }
             return true
         case #selector(NSResponder.insertNewline(_:)):
             copySelection()
@@ -351,10 +401,31 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         search.stringValue = ""
         reload()
         window.makeFirstResponder(table)
-        if !rows.isEmpty {
-            table.selectRowIndexes([0], byExtendingSelection: false)
+        if let first = firstClipRow {
+            table.selectRowIndexes([first], byExtendingSelection: false)
             table.scrollRowToVisible(0)
         }
+    }
+
+    // MARK: Quick Look
+
+    private func togglePreview() {
+        if QLPreviewPanel.sharedPreviewPanelExists(), QLPreviewPanel.shared().isVisible {
+            QLPreviewPanel.shared().orderOut(nil)
+        } else {
+            showPreview()
+        }
+    }
+
+    private func showPreview() {
+        refreshPreview()
+        guard !previewURLs.isEmpty else { return }
+        QLPreviewPanel.shared().makeKeyAndOrderFront(nil)
+    }
+
+    private func refreshPreview() {
+        previewURLs = table.selectedRowIndexes.compactMap(clip(at:)).compactMap(store.fileForClip)
+        if QLPreviewPanel.sharedPreviewPanelExists() { QLPreviewPanel.shared().reloadData() }
     }
 
     // MARK: Right-click menu
@@ -363,20 +434,25 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         menu.removeAllItems()
         let list = targetClips()
         guard let first = list.first else { return }
-        func add(_ title: String, _ action: Selector) {
+        func add(_ title: String, _ action: Selector, symbol: String) {
             let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
             item.target = self
+            item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
             menu.addItem(item)
         }
         let single = list.count == 1
-        add(single ? "Copy" : "Copy \(list.count) Items", #selector(menuCopy))
-        if list.contains(where: { $0.text?.isEmpty == false }) { add("Copy as Plain Text", #selector(menuCopyPlain)) }
-        if single, first.kind == .text { add("Edit Before Copying…", #selector(menuEdit)) }
-        if single, first.link != nil { add("Open Link", #selector(menuOpenLink)) }
-        if single, first.kind != .text, !first.files.isEmpty { add("Show in Finder", #selector(menuShowInFinder)) }
+        add(single ? "Copy" : "Copy \(list.count) Items", #selector(menuCopy), symbol: "doc.on.doc")
+        if list.contains(where: { $0.text?.isEmpty == false }) {
+            add("Copy as Plain Text", #selector(menuCopyPlain), symbol: "textformat")
+        }
+        if single, first.kind == .text { add("Edit Before Copying…", #selector(menuEdit), symbol: "pencil") }
         menu.addItem(.separator())
-        add(list.allSatisfy(\.pinned) ? "Unpin" : "Pin to Top", #selector(menuPin))
-        add(single ? "Remove from Shelf" : "Remove \(list.count) Items", #selector(menuRemove))
+        if single { add("Preview", #selector(menuPreview), symbol: "eye") }
+        if single, first.link != nil { add("Open Link", #selector(menuOpenLink), symbol: "safari") }
+        if single, first.kind != .text, !first.files.isEmpty { add("Show in Finder", #selector(menuShowInFinder), symbol: "folder") }
+        menu.addItem(.separator())
+        add(list.allSatisfy(\.pinned) ? "Unpin" : "Pin to Top", #selector(menuPin), symbol: "pin")
+        add(single ? "Remove from Shelf" : "Remove \(list.count) Items", #selector(menuRemove), symbol: "trash")
     }
 
     @objc private func menuCopy() { copyAndHide(targetClips()) }
@@ -388,6 +464,10 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
 
     @objc private func menuPin() { store.togglePin(targetClips()) }
     @objc private func menuRemove() { store.remove(targetClips()) }
+
+    @objc private func menuPreview() {
+        if let id = targetClips().first?.id { perform(.preview, on: id) }
+    }
 
     @objc private func menuOpenLink() {
         if let url = targetClips().first?.link { NSWorkspace.shared.open(url) }
@@ -425,7 +505,7 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
     // MARK: Drag out
 
     func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
-        store.dragItem(for: rows[row])
+        clip(at: row).map(store.dragItem)
     }
 
     // MARK: Drag in
@@ -449,6 +529,33 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         guard let clip = Clip.capture(pb) else { return false }
         store.add(clip, countUnseen: false)
         store.flash(notice: "Added to shelf")
+        return true
+    }
+
+    // MARK: Screenshots
+
+    // Shows a selected item and a hovered one, for `--screenshot`.
+    func showDemoState() {
+        let clipRows = rows.indices.filter { rows[$0].clip != nil }
+        guard clipRows.count > 2 else { return }
+        table.selectRowIndexes([clipRows[2]], byExtendingSelection: false)
+        (table.view(atColumn: 0, row: clipRows[1], makeIfNecessary: true) as? HostCell)?.setHovered(true)
+    }
+}
+
+// MARK: - Quick Look
+
+extension ShelfController: @preconcurrency QLPreviewPanelDataSource, @preconcurrency QLPreviewPanelDelegate {
+    func numberOfPreviewItems(in panel: QLPreviewPanel!) -> Int { previewURLs.count }
+
+    func previewPanel(_ panel: QLPreviewPanel!, previewItemAt index: Int) -> (any QLPreviewItem)! {
+        previewURLs[index] as NSURL
+    }
+
+    // Arrow keys and Space keep working while the preview is in front.
+    func previewPanel(_ panel: QLPreviewPanel!, handle event: NSEvent!) -> Bool {
+        guard event.type == .keyDown else { return false }
+        table.keyDown(with: event)
         return true
     }
 }

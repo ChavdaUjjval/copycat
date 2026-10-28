@@ -19,8 +19,6 @@ enum Limits {
     static let typeBytes = 20_000_000       // skip any single representation bigger than this
     static let storeBytes = 250_000_000     // total history size before old items are dropped
     static let keptFileBytes = 200_000_000  // largest iPhone/iPad file the shelf keeps a copy of
-    static let unpinnedItems = 50
-    static let expiry: TimeInterval = 24 * 60 * 60
 }
 
 enum Storage {
@@ -100,6 +98,18 @@ struct Clip: Identifiable, Codable, Equatable {
             return (UTType.png.identifier, png)
         }
         return nil
+    }
+
+    // A copied colour code such as #F5568A, shown with a swatch.
+    var color: NSColor? {
+        guard files.isEmpty, thumb == nil, let t = text?.trimmingCharacters(in: .whitespacesAndNewlines),
+              t.first == "#", t.count == 4 || t.count == 7 else { return nil }
+        var hex = String(t.dropFirst())
+        guard hex.allSatisfy(\.isHexDigit) else { return nil }
+        if hex.count == 3 { hex = hex.map { "\($0)\($0)" }.joined() }
+        guard let v = UInt32(hex, radix: 16) else { return nil }
+        return NSColor(srgbRed: CGFloat(v >> 16 & 0xFF) / 255, green: CGFloat(v >> 8 & 0xFF) / 255,
+                       blue: CGFloat(v & 0xFF) / 255, alpha: 1)
     }
 
     static func fileKey(_ urls: [URL]) -> String { "f:" + urls.map(\.path).joined(separator: "|") }

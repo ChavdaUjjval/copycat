@@ -5,6 +5,7 @@ import ServiceManagement
 final class AppDelegate: NSObject, NSApplicationDelegate {
     let store = Store()
     private var shelf: ShelfController?
+    private lazy var settings = SettingsWindowController(store: store)
     private var timers: [Timer] = []
     private var showWhenReady = false
 
@@ -13,6 +14,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         buildMainMenu()
         let shelf = ShelfController(store: store)
         shelf.onCopied = { [weak self] in self?.afterCopy() }
+        shelf.onOpenSettings = { [weak self] in self?.showSettings() }
         self.shelf = shelf
         HotKey.register()
 
@@ -65,12 +67,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    // After copying: flash "Copied", then hide so focus returns to the previous app.
+    // After copying: flash "Copied", then hide so focus returns to the previous app,
+    // and paste there if that's turned on in Settings.
     private func afterCopy() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
             MainActor.assumeIsolated {
                 NSApp.hide(nil)
                 self.store.flashed = nil
+                guard Preferences.autoPaste else { return }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { AutoPaste.paste() }
             }
         }
     }
@@ -110,8 +115,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(.separator())
         menu.addItem(menuItem("Wipe Clipboard", #selector(wipeClipboard)))
         menu.addItem(menuItem("Pause Capturing", #selector(togglePause), on: store.paused))
-        menu.addItem(menuItem("Open at Login", #selector(toggleLogin), on: SMAppService.mainApp.status == .enabled))
+        menu.addItem(menuItem("Open at Login", #selector(toggleLogin), on: LoginItem.isEnabled))
         menu.addItem(.separator())
+        menu.addItem(menuItem("Settings…", #selector(showSettings)))
         menu.addItem(menuItem("About Copycat", #selector(showAbout)))
         return menu
     }
@@ -133,17 +139,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func togglePause() { store.paused.toggle() }
 
-    @objc private func toggleLogin() {
-        do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-        } catch {
-            NSAlert(error: error).runModal()
-        }
-    }
+    @objc private func toggleLogin() { LoginItem.set(!LoginItem.isEnabled) }
+
+    @objc private func showSettings() { settings.show() }
 
     @objc private func showAbout() {
         let credits = NSAttributedString(
@@ -159,10 +157,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let appMenu = NSMenu()
         appMenu.addItem(menuItem("About Copycat", #selector(showAbout)))
         appMenu.addItem(.separator())
+        appMenu.addItem(menuItem("Settings…", #selector(showSettings), key: ","))
+        appMenu.addItem(.separator())
         appMenu.addItem(withTitle: "Hide Copycat", action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
         appMenu.addItem(withTitle: "Quit Copycat", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
         let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(withTitle: "Undo", action: Selector(("undo:")), keyEquivalent: "z")
+        editMenu.addItem(withTitle: "Redo", action: Selector(("redo:")), keyEquivalent: "Z")
+        editMenu.addItem(.separator())
         editMenu.addItem(withTitle: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x")
         editMenu.addItem(withTitle: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c")
         editMenu.addItem(withTitle: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v")

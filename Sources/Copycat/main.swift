@@ -24,8 +24,20 @@ if let i = arguments.firstIndex(of: "--dmg-background"), i + 1 < arguments.count
     exit(0)
 }
 
+Preferences.registerDefaults()
+
 MainActor.assumeIsolated {
     let app = NSApplication.shared
+    if let i = arguments.firstIndex(of: "--settings-screenshot"), i + 1 < arguments.count {
+        Screenshot.renderSettings(to: arguments[i + 1])
+        exit(0)
+    }
+    if let i = arguments.firstIndex(of: "--screenshot"), i + 1 < arguments.count {
+        let width = arguments.firstIndex(of: "--width").flatMap { $0 + 1 < arguments.count ? Double(arguments[$0 + 1]) : nil }
+        Screenshot.render(to: arguments[i + 1], dark: arguments.contains("--dark"),
+                          empty: arguments.contains("--empty"), width: CGFloat(width ?? 420))
+        exit(0)
+    }
     let delegate = AppDelegate()
     app.delegate = delegate
     app.setActivationPolicy(.regular)
