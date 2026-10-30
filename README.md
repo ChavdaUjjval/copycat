@@ -13,6 +13,12 @@ curl -fsSL https://chavdaujjval.github.io/copycat/install | bash
 <p align="center"><sub>or <code>brew install chavdaujjval/tap/copycat</code> · macOS 14 or later</sub></p>
 
 <p align="center">
+  <a href="https://chavdaujjval.github.io/copycat/demo.mp4"><img src="docs/demo-poster.jpg" width="720" alt="Watch the Copycat demo, 37 seconds with sound"></a>
+  <br>
+  <sub><a href="https://chavdaujjval.github.io/copycat/demo.mp4">▶ Watch the 37-second demo</a></sub>
+</p>
+
+<p align="center">
   <img src="docs/screenshot-light.png" width="360" alt="Copycat in light mode">
   &nbsp;
   <img src="docs/screenshot-dark.png" width="360" alt="Copycat in dark mode">

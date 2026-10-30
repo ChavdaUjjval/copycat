@@ -1,11 +1,12 @@
 # Publishes the installer at https://chavdaujjval.github.io/copycat/install, for the short
-# install command. The page itself just points to the repository.
+# install command, and the demo video at /demo.mp4 so the README can link to a playable file.
+# The page itself just points to the repository.
 name: Pages
 
 on:
   push:
     branches: [main]
-    paths: [install.sh, .github/workflows/pages.yml]
+    paths: [install.sh, docs/demo.mp4, .github/workflows/pages.yml]
   workflow_dispatch:
 
 permissions:
@@ -33,6 +34,7 @@ jobs:
           mkdir _site
           cp install.sh _site/install
           cp install.sh _site/install.sh
+          cp docs/demo.mp4 _site/demo.mp4
           cat > _site/index.html <<'EOF'
           <!doctype html>
           <meta charset="utf-8">
