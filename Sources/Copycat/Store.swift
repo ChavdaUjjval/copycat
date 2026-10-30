@@ -93,21 +93,31 @@ final class Store: ObservableObject {
         let dir = Storage.keptFiles.appendingPathComponent(id.uuidString)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         receiving.insert(id)
+        Self.receivePromisedFiles(promises, into: dir, queue: promiseQueue) { urls in
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    self.receiving.remove(id)
+                    self.addFiles(urls, id: id, kept: true)
+                }
+            }
+        }
+    }
+
+    // File promises and Quick Look call back on their own queues. Their callbacks are made in
+    // nonisolated functions: made inside the store, older compilers treat them as main-thread
+    // code and stop the app when they run anywhere else.
+    nonisolated private static func receivePromisedFiles(_ promises: [NSFilePromiseReceiver], into dir: URL,
+                                                         queue: OperationQueue, done: @escaping @Sendable ([URL]) -> Void) {
         let group = DispatchGroup()
         let received = OSAllocatedUnfairLock(initialState: [URL]())
         for promise in promises {
             for _ in promise.fileNames { group.enter() }
-            promise.receivePromisedFiles(atDestination: dir, options: [:], operationQueue: promiseQueue) { url, error in
+            promise.receivePromisedFiles(atDestination: dir, options: [:], operationQueue: queue) { url, error in
                 if error == nil { received.withLock { $0.append(url) } }
                 group.leave()
             }
         }
-        group.notify(queue: .main) {
-            MainActor.assumeIsolated {
-                self.receiving.remove(id)
-                self.addFiles(received.withLock { $0 }, id: id, kept: true)
-            }
-        }
+        group.notify(queue: .global(qos: .utility)) { done(received.withLock { $0 }) }
     }
 
     // Video frames, PDF pages and other file previews, generated in the background.
@@ -118,8 +128,7 @@ final class Store: ObservableObject {
         let request = QLThumbnailGenerator.Request(fileAt: url, size: CGSize(width: side, height: side),
                                                    scale: 2, representationTypes: .thumbnail)
         let id = clip.id
-        QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { rep, _ in
-            guard let thumb = rep.flatMap({ Images.png($0.cgImage) }) else { return }
+        Self.thumbnail(for: request) { thumb in
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let i = self.clips.firstIndex(where: { $0.id == id }) else { return }
@@ -127,6 +136,13 @@ final class Store: ObservableObject {
                     self.save()
                 }
             }
+        }
+    }
+
+    nonisolated private static func thumbnail(for request: QLThumbnailGenerator.Request,
+                                              done: @escaping @Sendable (Data) -> Void) {
+        QLThumbnailGenerator.shared.generateBestRepresentation(for: request) { rep, _ in
+            if let thumb = rep.flatMap({ Images.png($0.cgImage) }) { done(thumb) }
         }
     }
 
@@ -321,15 +337,23 @@ final class Store: ObservableObject {
         return f
     }()
 
-    // What gets dragged out of the shelf: text stays text; photos, videos and files go as real files.
-    func dragItem(for clip: Clip) -> NSPasteboardItem {
+    // What gets dragged out of the shelf: text stays text; photos, videos and files go as real files,
+    // every file of the item, so Finder, Mail or a browser upload gets all of them.
+    func dragItems(for clip: Clip) -> [NSPasteboardItem] {
         if clip.kind == .text {
-            return Self.pasteboardItem(Self.writable(clip).first ?? [:])
+            return [Self.pasteboardItem(Self.writable(clip).first ?? [:])]
         }
-        let item = NSPasteboardItem()
-        if let url = fileForClip(clip) { item.setString(url.absoluteString, forType: .fileURL) }
-        if let image = clip.imageData { item.setData(image.data, forType: NSPasteboard.PasteboardType(image.type)) }
-        return item
+        let urls = clip.files.isEmpty ? [fileForClip(clip)].compactMap { $0 }
+            : clip.fileURLs.filter { FileManager.default.fileExists(atPath: $0.path) }
+        let items = urls.map { url in
+            let item = NSPasteboardItem()
+            item.setString(url.absoluteString, forType: .fileURL)
+            return item
+        }
+        if let image = clip.imageData {
+            (items.first ?? NSPasteboardItem()).setData(image.data, forType: NSPasteboard.PasteboardType(image.type))
+        }
+        return items
     }
 
     // MARK: Persistence

@@ -24,6 +24,7 @@ curl -fsSL https://chavdaujjval.github.io/copycat/install | bash
 - Keeps iPhone copies too, including photos.
 - <kbd>⌘1</kbd>–<kbd>⌘9</kbd> copies the first nine items. <kbd>Space</kbd> previews. <kbd>⌘Z</kbd> undoes a remove.
 - Search, filter, pin, and drag items in or out.
+- Files copied in Finder stay on the shelf. Copy them again later, or drag them into Finder, Mail, or a website upload such as Google Drive.
 - Optional: pastes for you after you pick an item.
 
 ## Privacy

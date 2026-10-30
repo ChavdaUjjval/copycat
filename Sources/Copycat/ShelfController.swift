@@ -613,8 +613,17 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
 
     // MARK: Drag out
 
-    func tableView(_ tableView: NSTableView, pasteboardWriterForRow row: Int) -> (any NSPasteboardWriting)? {
-        clip(at: row).map(store.dragItem)
+    // The rows' items are written together rather than one per row, so an item holding several
+    // files drags out all of them. AppKit calls this on the main thread, but the SDK doesn't say so.
+    nonisolated func tableView(_ tableView: NSTableView, writeRowsWith rowIndexes: IndexSet,
+                               to pboard: NSPasteboard) -> Bool {
+        nonisolated(unsafe) let pboard = pboard
+        return MainActor.assumeIsolated {
+            let items = rowIndexes.compactMap(clip(at:)).flatMap(store.dragItems)
+            guard !items.isEmpty else { return false }
+            pboard.clearContents()
+            return pboard.writeObjects(items)
+        }
     }
 
     // MARK: Drag in
