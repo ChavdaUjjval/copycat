@@ -106,6 +106,9 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         window.isReleasedWhenClosed = false
         window.minSize = NSSize(width: 360, height: 420)
         window.delegate = self
+        // Shown on every Space, full-screen apps included, so it stays in view while you swipe
+        // between Spaces or move it to a display that has a full-screen app.
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         buildUI()
         if !window.setFrameUsingName("CopycatWindow") { window.center() }
         window.setFrameAutosaveName("CopycatWindow")
@@ -504,6 +507,29 @@ final class ShelfController: NSObject, NSTableViewDataSource, NSTableViewDelegat
         default:
             return false
         }
+    }
+
+    // With more than one display, opens on the one with the pointer, where you're working,
+    // at the same place relative to that display.
+    func moveToPointerScreen() {
+        let screens = NSScreen.screens
+        let mouse = NSEvent.mouseLocation
+        guard let target = screens.first(where: { NSMouseInRect(mouse, $0.frame, false) }) else { return }
+        var frame = window.frame
+        let current = screens.max { a, b in
+            a.frame.intersection(frame).width * a.frame.intersection(frame).height
+                < b.frame.intersection(frame).width * b.frame.intersection(frame).height
+        }
+        guard current != target || target.visibleFrame.intersection(frame).isEmpty else { return }
+        let from = current?.visibleFrame ?? target.visibleFrame, to = target.visibleFrame
+        frame.size = NSSize(width: min(frame.width, to.width), height: min(frame.height, to.height))
+        func place(_ pos: CGFloat, _ start: CGFloat, _ room: CGFloat, _ newStart: CGFloat, _ newRoom: CGFloat) -> CGFloat {
+            let share = room > 0 ? min(max((pos - start) / room, 0), 1) : 0.5
+            return newStart + share * max(newRoom, 0)
+        }
+        frame.origin.x = place(frame.minX, from.minX, from.width - frame.width, to.minX, to.width - frame.width)
+        frame.origin.y = place(frame.minY, from.minY, from.height - frame.height, to.minY, to.height - frame.height)
+        window.setFrame(frame, display: false)
     }
 
     func focusForKeyboard() {

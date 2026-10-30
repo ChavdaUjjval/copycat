@@ -243,7 +243,7 @@ enum RowAction { case pin, preview, remove }
 // The buttons are AppKit controls so clicks on them don't also count as clicking the row.
 final class HostCell: NSTableCellView {
     static let identifier = NSUserInterfaceItemIdentifier("cell")
-    let host = NSHostingView(rootView: ClipRow(clip: Clip()))
+    let host = RowHost(rootView: ClipRow(clip: Clip()))
     var onAction: (RowAction) -> Void = { _ in }
 
     private var row = ClipRow(clip: Clip())
@@ -374,6 +374,12 @@ final class HeaderCell: NSTableCellView {
 }
 
 // Table rows draw nothing themselves: the hosted rows and headers do.
+// The window moves when its background is dragged. A row isn't background: dragging it drags
+// the item out.
+final class RowHost: NSHostingView<ClipRow> {
+    override var mouseDownCanMoveWindow: Bool { false }
+}
+
 final class PlainRowView: NSTableRowView {
     override func drawBackground(in dirtyRect: NSRect) {}
     override func drawSelection(in dirtyRect: NSRect) {}

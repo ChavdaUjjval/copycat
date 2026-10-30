@@ -2,6 +2,8 @@
 //
 // • Open it from the Dock icon or with ⌃⌘V from anywhere. Single-click an item (or pick it with
 //   the arrow keys and press Return) to copy it; the shelf then hides so you can paste as usual.
+//   Otherwise it stays open beside other apps, for dragging items into them, until you press
+//   ⌃⌘V or Esc or close it.
 // • ⌘-click / ⇧-click to select several items, then drag them out into any app, or press Return to copy them all.
 // • Drag text, photos or videos onto the shelf (or files onto its Dock icon) to keep them for later.
 // • Right-click for Copy as Plain Text, Edit Before Copying, Pin, Remove.

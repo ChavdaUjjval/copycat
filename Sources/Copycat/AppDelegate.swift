@@ -62,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         store.unseen = 0
         shelf.reload()   // refresh "x min ago" labels
+        if !shelf.window.isVisible { shelf.moveToPointerScreen() }
         shelf.window.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -92,11 +93,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         show()
         return false
-    }
-
-    // Behaves like a popover: clicking another app puts the shelf away.
-    func applicationDidResignActive(_ note: Notification) {
-        shelf?.window.orderOut(nil)
     }
 
     // Files dropped onto the Dock icon.
